@@ -1,0 +1,19 @@
+[package]
+name = "autofolkmusic"
+authors = ["13th Eye <jjhh@13theye.com>"]
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nannou = "0.19"
+nnpipe = { git = "https://github.com/13theye/nnpipe", branch = "main" }
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8"
+
+[lib]
+name = "autofolkmusic"
+path = "src/lib.rs"
+
+[[bin]]
+name = "autofolkmusic"
+path = "src/main.rs"
