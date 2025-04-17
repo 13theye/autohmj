@@ -1,19 +1,22 @@
 [package]
-name = "autofolkmusic"
+name = "autohmjeum"
 authors = ["13th Eye <jjhh@13theye.com>"]
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+hangeul = "0.4.0"
+rustkorean = "1.1.2"
 nannou = "0.19"
+nannou_egui = "0.19"
 nnpipe = { git = "https://github.com/13theye/nnpipe", branch = "main" }
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 
 [lib]
-name = "autofolkmusic"
+name = "autohmjeum"
 path = "src/lib.rs"
 
 [[bin]]
-name = "autofolkmusic"
+name = "autohmjeum"
 path = "src/main.rs"

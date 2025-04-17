@@ -2,8 +2,8 @@
 //
 // Loads config.toml
 //
-// Version 1.0
-// 7 Apr 2025
+// Version 1.0-autofolk music
+// 15 Apr 2025
 
 use super::config_types::*;
 use serde::Deserialize;
@@ -12,13 +12,13 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub board: BoardConfig,
-    pub paths: PathConfig,
-    pub rendering: RenderConfig,
-    pub window: WindowConfig,
-    pub osc: OscConfig,
     pub frame_recorder: FrameRecorderConfig,
+    pub osc: OscConfig,
+    pub paths: PathConfig,
     pub speed: SpeedConfig,
+    pub rendering_main: RenderMainConfig,
+    pub main_window: MainWindowConfig,
+    pub input_window: InputWindowConfig,
 }
 
 impl Config {
