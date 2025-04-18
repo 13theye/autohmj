@@ -350,6 +350,7 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
 fn update_input(_app: &App, model: &mut Model, update: Update) {
     let egui = &mut model.egui;
     egui.set_elapsed_time(update.since_start);
+
     let ctx = egui.begin_frame();
 
     let text_edit_id = egui::Id::new("input_field");
