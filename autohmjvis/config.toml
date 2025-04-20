@@ -1,8 +1,6 @@
 # config.toml
-
-[paths]
-#paths are relative to executable directory
-output_directory = "frames"
+[server]
+port = 50001
 
 [rendering_main]
 texture_width = 3800
@@ -18,15 +16,10 @@ arc_resolution = 25
 width = 1900
 height = 540
 
-[input_window]
-# The size of the input window.
-# Currently scaling to 1/2 of texture resolution
-width = 600
-height = 400
-
 [osc]
 # OSC listening port. UDP only.
 rx_port = 8000
+
 
 [frame_recorder]
 # Settings for the frame recorder
@@ -34,6 +27,10 @@ rx_port = 8000
 # Frame limit of 50000 frames is about 13m53s at 60fps
 frame_limit = 50000
 fps = 30
+
+[paths]
+#paths are relative to executable directory
+output_directory = "frames"
 
 [speed]
 bpm = 120

@@ -18,7 +18,7 @@ pub struct Config {
     pub speed: SpeedConfig,
     pub rendering_main: RenderMainConfig,
     pub main_window: MainWindowConfig,
-    pub input_window: InputWindowConfig,
+    pub server: ServerConfig,
 }
 
 impl Config {

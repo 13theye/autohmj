@@ -1,8 +1,11 @@
 // src/main.rs
+//
+// auto-hunminjeongak server and visualizer
+//
 
 use nannou::{prelude::*, text::*};
 use nnpipe::*;
-use std::{fs, time::Instant};
+use std::{collections::HashMap, fs, io::ErrorKind, net::UdpSocket, time::Instant};
 
 use autohmjvis::{config::Config, views::BackgroundManager};
 
@@ -15,6 +18,10 @@ struct Model {
     input_history: Vec<String>,
 
     main_font: Font,
+
+    // networking
+    socket: UdpSocket,
+    connections: HashMap<String, String>,
 
     // Random
     rng: nannou::rand::rngs::ThreadRng,
@@ -42,6 +49,11 @@ struct Model {
 fn model(app: &App) -> Model {
     // Load config
     let config = Config::load().expect("\nAuto훈민정음: FAILED TO LOAD CONFIG.TOML\n");
+
+    // Set up UDP socket
+    let socket = UdpSocket::bind(format!("0.0.0.0:{}", config.server.port))
+        .expect("Failed to bind UDP socket");
+    socket.set_nonblocking(true).unwrap();
 
     // --- Load Font for Nannou Draw ---
     // Assumes "assets/gulim.ttf" exists relative to the executable
@@ -135,6 +147,9 @@ fn model(app: &App) -> Model {
 
         main_font,
 
+        socket,
+        connections: HashMap::new(),
+
         post_processing,
 
         last_update: Instant::now(),
@@ -166,8 +181,11 @@ fn update(app: &App, model: &mut Model, update: Update) {
     // Handle the background
     model.background.draw(&model.draw, app.time);
 
+    // Receive incoming datagrams and update connections
+    receive(model);
+
     // Update & draw
-    draw_output(model);
+    draw_output(app, model);
 
     render_and_post(app, model);
 }
@@ -181,16 +199,21 @@ fn view(_app: &App, model: &Model, frame: Frame) {
         .encode_render_pass(frame.texture_view(), &mut encoder);
 }
 
-fn draw_output(model: &Model) {
-    model
-        .draw
-        .text(&model.input_string)
-        .layout(&model.text_layout)
-        .width(1000.0)
-        .font(model.main_font.clone())
-        .x_y(0.0, 0.0)
-        .color(rgba(0.71, 0.71, 1.0, 1.0))
-        .font_size(50);
+fn draw_output(app: &App, model: &Model) {
+    let num = model.connections.len() as f32;
+    let rect = app.main_window().rect();
+    for (i, (_id, text)) in model.connections.iter().enumerate() {
+        let x = rect.left() + rect.w() / (num + 1.0) * (i as f32 + 1.0);
+        model
+            .draw
+            .text(text)
+            .layout(&model.text_layout)
+            .width(1000.0)
+            .font(model.main_font.clone())
+            .x_y(x, 0.0)
+            .color(rgba(0.71, 0.71, 1.0, 1.0))
+            .font_size(50);
+    }
     // Handle FPS and origin display
     if model.verbose {
         draw_fps(model);
@@ -214,6 +237,24 @@ fn render_and_post(app: &App, model: &mut Model) {
         &mut model.draw_renderer,
         &model.draw,
     );
+}
+
+// ************************ Networking *************************************************
+fn receive(model: &mut Model) {
+    let mut buf = [0u8; 1024];
+    loop {
+        match model.socket.recv_from(&mut buf) {
+            Ok((n, _src)) => {
+                if let Ok(msg) = std::str::from_utf8(&buf[..n]) {
+                    if let Some((id, text)) = msg.split_once(':') {
+                        model.connections.insert(id.to_string(), text.to_string());
+                    }
+                }
+            }
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
+            Err(e) => eprintln!("UDP recv error: {}", e),
+        }
+    }
 }
 
 // ************************ FPS and debug display  *************************************

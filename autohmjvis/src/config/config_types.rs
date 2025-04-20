@@ -11,9 +11,8 @@ pub struct MainWindowConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct InputWindowConfig {
-    pub width: u32,
-    pub height: u32,
+pub struct ServerConfig {
+    pub port: u32,
 }
 
 #[derive(Debug, Deserialize)]
