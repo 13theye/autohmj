@@ -5,7 +5,14 @@
 
 use nannou::{prelude::*, text::*};
 use nnpipe::*;
-use std::{collections::HashMap, fs, io::ErrorKind, net::UdpSocket, time::Instant};
+use std::{
+    collections::HashMap,
+    fs,
+    net::TcpListener,
+    sync::mpsc::{channel, Receiver},
+    time::Instant,
+};
+use tungstenite::{accept, Message};
 
 use autohmjvis::{config::Config, views::BackgroundManager};
 
@@ -20,7 +27,7 @@ struct Model {
     main_font: Font,
 
     // networking
-    socket: UdpSocket,
+    ws_rx: Receiver<String>,
     connections: HashMap<String, String>,
 
     // Random
@@ -50,10 +57,27 @@ fn model(app: &App) -> Model {
     // Load config
     let config = Config::load().expect("\nAuto훈민정음: FAILED TO LOAD CONFIG.TOML\n");
 
-    // Set up UDP socket
-    let socket = UdpSocket::bind(format!("0.0.0.0:{}", config.server.port))
-        .expect("Failed to bind UDP socket");
-    socket.set_nonblocking(true).unwrap();
+    // Set up WebSocket
+    let (ws_tx, ws_rx) = channel::<String>();
+    let listen_addr = format!("0.0.0.0:{}", config.server.port);
+    std::thread::spawn(move || {
+        let listener = TcpListener::bind(&listen_addr).expect("Failed to bind WebSocket listener");
+
+        // for each new TCP connection:
+        for stream in listener.incoming().flatten() {
+            let mut ws = accept(stream).expect("WebSocket handshake failed");
+            let tx = ws_tx.clone();
+            std::thread::spawn(move || {
+                while let Ok(msg) = ws.read() {
+                    if let Message::Text(utf8) = msg {
+                        // Utf8Bytes -> string
+                        let line = utf8.to_string();
+                        let _ = tx.send(line);
+                    }
+                }
+            });
+        }
+    });
 
     // --- Load Font for Nannou Draw ---
     // Assumes "assets/gulim.ttf" exists relative to the executable
@@ -147,7 +171,7 @@ fn model(app: &App) -> Model {
 
         main_font,
 
-        socket,
+        ws_rx,
         connections: HashMap::new(),
 
         post_processing,
@@ -167,7 +191,7 @@ fn main() {
     nannou::app(model).update(update).run();
 }
 
-fn update(app: &App, model: &mut Model, update: Update) {
+fn update(app: &App, model: &mut Model, _update: Update) {
     let now = Instant::now();
     let duration = now - model.last_update;
     let dt = duration.as_secs_f32();
@@ -241,18 +265,10 @@ fn render_and_post(app: &App, model: &mut Model) {
 
 // ************************ Networking *************************************************
 fn receive(model: &mut Model) {
-    let mut buf = [0u8; 1024];
-    loop {
-        match model.socket.recv_from(&mut buf) {
-            Ok((n, _src)) => {
-                if let Ok(msg) = std::str::from_utf8(&buf[..n]) {
-                    if let Some((id, text)) = msg.split_once(':') {
-                        model.connections.insert(id.to_string(), text.to_string());
-                    }
-                }
-            }
-            Err(ref e) if e.kind() == ErrorKind::WouldBlock => break,
-            Err(e) => eprintln!("UDP recv error: {}", e),
+    // Drain everything that arrived since last frame
+    while let Ok(raw) = model.ws_rx.try_recv() {
+        if let Some((id, text)) = raw.split_once(':') {
+            model.connections.insert(id.to_string(), text.to_string());
         }
     }
 }
