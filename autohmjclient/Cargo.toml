@@ -11,6 +11,9 @@ rustkorean = "1.1"
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
+tungstenite = "0.26"
+url = "2"
+
 
 [lib]
 name = "autohmj"

@@ -8,7 +8,8 @@ use autohmj::config::Config;
 use eframe::{egui, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
 use rand::{thread_rng, Rng};
-use std::net::UdpSocket;
+use std::sync::mpsc::{channel, Sender};
+use tungstenite::{connect, Message};
 
 // The application state for the input-only window
 struct Model {
@@ -20,18 +21,25 @@ struct Model {
     input_focus_next_frame: bool,
     // text field id
     input_id: egui::Id,
-    // Udp socket for communicating with server/visualizer
-    socket: UdpSocket,
+    // WebSocket for communicating with server/visualizer
+    ws_tx: Sender<String>,
     client_id: String,
 }
 
 impl Model {
     fn new(cfg: Config) -> Self {
-        let server = format!("{}:{}", cfg.server.address, cfg.server.port);
-        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket");
-        socket
-            .connect(&server)
-            .expect("Failed to connect to server");
+        // Prepare the WebSocket client channel
+        let (ws_tx, ws_rx) = channel::<String>();
+        let ws_url = format!("ws://{}:{}", cfg.server.address, cfg.server.port);
+
+        // spawn WebSocket client thread
+        std::thread::spawn(move || {
+            let (mut ws, _) = connect(ws_url).expect("Failed to connect WebSocket"); // send every message received on ws_rx
+            for line in ws_rx {
+                let msg = Message::text(line);
+                let _ = ws.send(msg);
+            }
+        });
 
         // Generate random client ID
         let client_id = thread_rng().gen::<u32>().to_string();
@@ -41,7 +49,7 @@ impl Model {
             input_history: Vec::new(),
             input_focus_next_frame: true,
             input_id: egui::Id::new("input_field"),
-            socket,
+            ws_tx,
             client_id,
         }
     }
@@ -145,8 +153,8 @@ impl eframe::App for Model {
             });
 
         // After the UI is built, stream the current text live:
-        let msg = format!("{}:{}", self.client_id, self.input_text);
-        let _ = self.socket.send(msg.as_bytes());
+        let payload = format!("{}:{}", self.client_id, self.input_text);
+        let _ = self.ws_tx.send(payload);
     }
 }
 
