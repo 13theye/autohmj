@@ -1,6 +1,14 @@
+// src/main.rs
+//
+// auto-hunminjeongak
+//
+// handling user input
+
 use autohmj::config::Config;
 use eframe::{egui, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
+use rand::{thread_rng, Rng};
+use std::net::UdpSocket;
 
 // The application state for the input-only window
 struct Model {
@@ -12,15 +20,29 @@ struct Model {
     input_focus_next_frame: bool,
     // text field id
     input_id: egui::Id,
+    // Udp socket for communicating with server/visualizer
+    socket: UdpSocket,
+    client_id: String,
 }
 
-impl Default for Model {
-    fn default() -> Self {
+impl Model {
+    fn new(cfg: Config) -> Self {
+        let server = format!("{}:{}", cfg.server.address, cfg.server.port);
+        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind UDP socket");
+        socket
+            .connect(&server)
+            .expect("Failed to connect to server");
+
+        // Generate random client ID
+        let client_id = thread_rng().gen::<u32>().to_string();
+
         Self {
             input_text: String::new(),
             input_history: Vec::new(),
             input_focus_next_frame: true,
             input_id: egui::Id::new("input_field"),
+            socket,
+            client_id,
         }
     }
 }
@@ -121,6 +143,10 @@ impl eframe::App for Model {
                         }
                     });
             });
+
+        // After the UI is built, stream the current text live:
+        let msg = format!("{}:{}", self.client_id, self.input_text);
+        let _ = self.socket.send(msg.as_bytes());
     }
 }
 
@@ -141,7 +167,7 @@ fn main() {
             let fonts = make_gulim_fonts();
             cc.egui_ctx.set_fonts(fonts);
             set_styles(cc);
-            Ok(Box::new(Model::default()))
+            Ok(Box::new(Model::new(cfg)))
         }),
     )
     .unwrap();

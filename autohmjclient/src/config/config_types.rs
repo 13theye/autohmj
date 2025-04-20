@@ -5,6 +5,12 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
+pub struct ServerConfig {
+    pub port: f32,
+    pub address: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct WindowConfig {
     pub width: f32,
     pub height: f32,
