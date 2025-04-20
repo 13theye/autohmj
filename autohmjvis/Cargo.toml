@@ -1,5 +1,5 @@
 [package]
-name = "autohmjeum"
+name = "autohmjvis"
 authors = ["13th Eye <jjhh@13theye.com>"]
 version = "0.1.0"
 edition = "2021"
@@ -14,9 +14,9 @@ serde = { version = "1.0", features = ["derive"] }
 toml = "0.8"
 
 [lib]
-name = "autohmjeum"
+name = "autohmjvis"
 path = "src/lib.rs"
 
 [[bin]]
-name = "autohmjeum"
+name = "autohmjvis"
 path = "src/main.rs"
