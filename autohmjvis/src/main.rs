@@ -35,9 +35,6 @@ struct Model {
     ws_writers: Vec<Sender<String>>,        // one perconnetion
     connections: HashMap<String, String>,
 
-    // Random
-    rng: nannou::rand::rngs::ThreadRng,
-
     // Nannou API
     draw: nannou::Draw,
     draw_renderer: nannou::draw::Renderer,
@@ -47,12 +44,7 @@ struct Model {
     post_processing: Nnpipe,
 
     // FPS
-    last_update: Instant,
-    fps: f32,
-    fps_update_interval: f32,
-    frame_count: usize,
-    last_fps_display_update: f32,
-    frame_time_accumulator: f32,
+    fps: Fps,
 
     // When on, displays more verbose messages in terminal
     verbose: bool,
@@ -193,8 +185,6 @@ fn model(app: &App) -> Model {
 
         input_history: Vec::new(),
 
-        rng: nannou::rand::thread_rng(),
-
         draw,
         draw_renderer,
         texture_main,
@@ -209,12 +199,7 @@ fn model(app: &App) -> Model {
 
         post_processing,
 
-        last_update: Instant::now(),
-        fps: 0.0,
-        fps_update_interval: 0.3,
-        last_fps_display_update: 0.0,
-        frame_count: 0,
-        frame_time_accumulator: 0.0,
+        fps: Fps::default(),
 
         verbose: false,
     }
@@ -226,13 +211,13 @@ fn main() {
 
 fn update(app: &App, model: &mut Model, _update: Update) {
     let now = Instant::now();
-    let duration = now - model.last_update;
+    let duration = now - model.fps.last_update;
     let dt = duration.as_secs_f32();
-    model.last_update = now;
+    model.fps.last_update = now;
 
     // FPS calculations
     if model.verbose {
-        calculate_fps(app, model, dt);
+        model.fps.update(app.time, dt);
     }
 
     // Handle the background
@@ -341,7 +326,79 @@ fn receive(model: &mut Model) {
     }
 }
 
+// ************************ History handling  *************************************
+struct HistoryItem {
+    pub sender: String,
+    pub message: String,
+    pub translation: Option<String>,
+}
+impl HistoryItem {
+    pub fn new(sender: &str, message: &str) -> Self {
+        Self {
+            sender: sender.to_owned(),
+            message: message.to_owned(),
+            translation: None,
+        }
+    }
+}
+
+fn translate(message: &str) -> String {
+    // sends message to web translation API, returns the translated String
+    todo!();
+}
+
 // ************************ FPS and debug display  *************************************
+struct Fps {
+    pub last_update: Instant,
+    pub fps: f32,
+    pub fps_update_interval: f32,
+    pub frame_count: usize,
+    pub last_fps_display_update: f32,
+    pub frame_time_accumulator: f32,
+}
+
+impl Default for Fps {
+    fn default() -> Self {
+        Self {
+            last_update: Instant::now(),
+            fps: 0.0,
+            fps_update_interval: 0.3,
+            frame_count: 0,
+            last_fps_display_update: 0.0,
+            frame_time_accumulator: 0.0,
+        }
+    }
+}
+
+impl Fps {
+    pub fn start(&mut self, time: f32) {
+        self.fps = 0.0;
+        self.frame_count = 0;
+        self.frame_time_accumulator = 0.0;
+        self.last_fps_display_update = time;
+    }
+
+    pub fn update(&mut self, time: f32, dt: f32) {
+        self.frame_count += 1;
+        self.frame_time_accumulator += dt;
+        let elapsed_since_last_fps_update = time - self.last_fps_display_update;
+        if elapsed_since_last_fps_update >= self.fps_update_interval {
+            if self.frame_count > 0 {
+                let avg_frame_time = self.frame_time_accumulator / self.frame_count as f32;
+                self.fps = if avg_frame_time > 0.0 {
+                    1.0 / avg_frame_time
+                } else {
+                    0.0
+                };
+            }
+
+            // Reset accumulators
+            self.frame_count = 0;
+            self.frame_time_accumulator = 0.0;
+            self.last_fps_display_update = time;
+        }
+    }
+}
 
 fn draw_fps(model: &Model) {
     let draw = &model.draw;
@@ -356,38 +413,10 @@ fn draw_fps(model: &Model) {
         .stroke_weight(1.0);
 
     // Visualize FPS (Optional)
-    draw.text(&format!("FPS: {:.1}", model.fps))
+    draw.text(&format!("FPS: {:.1}", model.fps.fps))
         .x_y(900.0, 520.0)
         .color(RED)
         .font_size(20);
-}
-
-fn init_fps(app: &App, model: &mut Model) {
-    model.fps = 0.0;
-    model.frame_count = 0;
-    model.frame_time_accumulator = 0.0;
-    model.last_fps_display_update = app.time;
-}
-
-fn calculate_fps(app: &App, model: &mut Model, dt: f32) {
-    model.frame_count += 1;
-    model.frame_time_accumulator += dt;
-    let elapsed_since_last_fps_update = app.time - model.last_fps_display_update;
-    if elapsed_since_last_fps_update >= model.fps_update_interval {
-        if model.frame_count > 0 {
-            let avg_frame_time = model.frame_time_accumulator / model.frame_count as f32;
-            model.fps = if avg_frame_time > 0.0 {
-                1.0 / avg_frame_time
-            } else {
-                0.0
-            };
-        }
-
-        // Reset accumulators
-        model.frame_count = 0;
-        model.frame_time_accumulator = 0.0;
-        model.last_fps_display_update = app.time;
-    }
 }
 
 // ************************ Main window input  *************************************
@@ -396,7 +425,7 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
     match key {
         Key::P => {
             model.verbose = !model.verbose;
-            init_fps(app, model);
+            model.fps.start(app.time);
         }
         Key::A => {
             // cheap way to make clippy quiet
