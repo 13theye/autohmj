@@ -7,7 +7,6 @@
 use autohmj::config::Config;
 use eframe::{egui, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
-use rand::{thread_rng, Rng};
 use serde::Deserialize;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use tungstenite::{connect, Message};
@@ -33,6 +32,10 @@ struct Model {
 
 impl Model {
     fn new(cfg: Config) -> Self {
+        // Generate random client ID
+        let client_id = cfg.client.id;
+        let client_id_clone = client_id.clone();
+
         // Prepare WebSocket client channels: one for outgoing, one for incoming history
         let (ws_tx, ws_out_rx) = channel::<String>();
         let (ws_in_tx, ws_rx) = channel::<String>();
@@ -52,13 +55,17 @@ impl Model {
                 // Try to connect if not connected
                 if ws_opt.is_none() {
                     match connect(&ws_url) {
-                        Ok((socket, _)) => {
+                        Ok((mut socket, _)) => {
                             // Set non-blocking mode on the TCP stream
                             if let tungstenite::stream::MaybeTlsStream::Plain(tcp_stream) =
                                 socket.get_ref()
                             {
                                 let _ = tcp_stream.set_nonblocking(true);
                             }
+
+                            // Register with server
+                            let register_msg = format!("register|{}", client_id_clone);
+                            let _ = socket.send(Message::Text(register_msg.into()));
 
                             ws_opt = Some(socket);
                             let _ = status_tx.send(true);
@@ -112,9 +119,6 @@ impl Model {
             }
         });
 
-        // Generate random client ID
-        let client_id = thread_rng().gen::<u32>().to_string();
-
         Self {
             input_text: String::new(),
             input_history: Vec::new(),
@@ -122,7 +126,7 @@ impl Model {
             input_id: egui::Id::new("input_field"),
             ws_tx,
             ws_rx,
-            client_id,
+            client_id: client_id.clone(),
         }
     }
 }
@@ -226,12 +230,21 @@ impl eframe::App for Model {
 
                         // Display each entry in history
                         for line in &self.input_history {
-                            ui.label(
-                                egui::RichText::new(line)
-                                    .monospace()
-                                    .size(20.0)
-                                    .color(egui::Color32::WHITE),
-                            );
+                            if let Some((id, history_line)) = line.split_once(':') {
+                                let display: String = {
+                                    if id == self.client_id {
+                                        format!("You: {}", history_line)
+                                    } else {
+                                        format!("{}: {}", id, history_line)
+                                    }
+                                };
+                                ui.label(
+                                    egui::RichText::new(display)
+                                        .monospace()
+                                        .size(20.0)
+                                        .color(egui::Color32::WHITE),
+                                );
+                            }
                         }
                     });
             });

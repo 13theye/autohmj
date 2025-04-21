@@ -1,4 +1,7 @@
 # config.toml
+[client]
+id = "Human"
+
 [server]
 port = 50001
 address = "127.0.0.1"

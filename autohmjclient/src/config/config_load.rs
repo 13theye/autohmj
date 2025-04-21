@@ -15,6 +15,7 @@ pub struct Config {
     pub speed: SpeedConfig,
     pub window: WindowConfig,
     pub server: ServerConfig,
+    pub client: ClientConfig,
 }
 
 impl Config {

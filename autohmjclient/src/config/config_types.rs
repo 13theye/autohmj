@@ -5,6 +5,11 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
+pub struct ClientConfig {
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct ServerConfig {
     pub port: f32,
     pub address: String,
