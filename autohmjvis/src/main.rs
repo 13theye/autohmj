@@ -5,29 +5,34 @@
 
 use nannou::{prelude::*, text::*};
 use nnpipe::*;
+use serde::Serialize;
 use std::{
     collections::HashMap,
     fs,
     net::TcpListener,
-    sync::mpsc::{channel, Receiver},
+    sync::mpsc::{channel, Receiver, Sender},
     time::Instant,
 };
 use tungstenite::{accept, Message};
 
 use autohmjvis::{config::Config, views::BackgroundManager};
 
+#[derive(Serialize)]
+struct History(pub Vec<String>);
+
 struct Model {
     background: BackgroundManager,
     text_layout: Layout,
 
     // input
-    input_string: String,
     input_history: Vec<String>,
 
     main_font: Font,
 
     // networking
     ws_rx: Receiver<String>,
+    ws_writer_rx: Receiver<Sender<String>>, // new writers from accept thread
+    ws_writers: Vec<Sender<String>>,        // one perconnetion
     connections: HashMap<String, String>,
 
     // Random
@@ -59,6 +64,7 @@ fn model(app: &App) -> Model {
 
     // Set up WebSocket
     let (ws_tx, ws_rx) = channel::<String>();
+    let (writer_tx, ws_writer_rx) = channel::<Sender<String>>();
     let listen_addr = format!("0.0.0.0:{}", config.server.port);
     std::thread::spawn(move || {
         let listener = TcpListener::bind(&listen_addr).expect("Failed to bind WebSocket listener");
@@ -66,14 +72,40 @@ fn model(app: &App) -> Model {
         // for each new TCP connection:
         for stream in listener.incoming().flatten() {
             let mut ws = accept(stream).expect("WebSocket handshake failed");
-            let tx = ws_tx.clone();
+
+            // create a channel for this client's outbound messages
+            let (out_tx, out_rx) = channel::<String>();
+
+            // tell main thread that there's a new client that can be written to
+            writer_tx.send(out_tx.clone()).unwrap();
+
+            let in_tx = ws_tx.clone();
+
+            // set nonblocking so read_message() returns WouldBlock
+            ws.get_mut().set_nonblocking(true).unwrap();
+
+            // Now run a simple read/write loop
             std::thread::spawn(move || {
-                while let Ok(msg) = ws.read() {
-                    if let Message::Text(utf8) = msg {
-                        // Utf8Bytes -> string
-                        let line = utf8.to_string();
-                        let _ = tx.send(line);
+                loop {
+                    // 1. Read commits
+                    match ws.read() {
+                        Ok(Message::Text(utf8)) => {
+                            let line = utf8.to_string();
+                            let _ = in_tx.send(line);
+                        }
+                        Err(tungstenite::Error::Io(ref e))
+                            if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                        Err(_) => break, // connection closed or error
+                        _ => {}
                     }
+
+                    // 2. Drain outbound history messages
+                    while let Ok(msg) = out_rx.try_recv() {
+                        let _ = ws.send(Message::Text(msg.into()));
+                    }
+
+                    // avoid busy-spin
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
             });
         }
@@ -159,7 +191,6 @@ fn model(app: &App) -> Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         text_layout,
 
-        input_string: String::new(),
         input_history: Vec::new(),
 
         rng: nannou::rand::thread_rng(),
@@ -172,6 +203,8 @@ fn model(app: &App) -> Model {
         main_font,
 
         ws_rx,
+        ws_writer_rx,
+        ws_writers: Vec::new(),
         connections: HashMap::new(),
 
         post_processing,
@@ -265,10 +298,38 @@ fn render_and_post(app: &App, model: &mut Model) {
 
 // ************************ Networking *************************************************
 fn receive(model: &mut Model) {
+    // Pick up any brand-new client writers
+    while let Ok(writer) = model.ws_writer_rx.try_recv() {
+        model.ws_writers.push(writer);
+    }
+
+    let mut history_updated = false;
+
     // Drain everything that arrived since last frame
     while let Ok(raw) = model.ws_rx.try_recv() {
         if let Some((id, text)) = raw.split_once(':') {
-            model.connections.insert(id.to_string(), text.to_string());
+            // Update the connections map for live display
+            if !text.is_empty() {
+                model.connections.insert(id.to_string(), text.to_string());
+            } else {
+                // Remove empty text entries
+                model.connections.remove(id);
+            }
+
+            // If message ends with newline, it's a committed message
+            if text.ends_with('\n') {
+                let entry = format!("{}:{}", id, text);
+                model.input_history.push(entry);
+                history_updated = true;
+            }
+        }
+    }
+
+    // 2) broadcast the updated history if it was updated
+    if history_updated {
+        let dump = serde_json::to_string(&History(model.input_history.clone())).unwrap();
+        for writer in &model.ws_writers {
+            let _ = writer.send(dump.clone());
         }
     }
 }
