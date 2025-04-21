@@ -8,8 +8,12 @@ use autohmj::config::Config;
 use eframe::{egui, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
 use rand::{thread_rng, Rng};
-use std::sync::mpsc::{channel, Sender};
+use serde::Deserialize;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use tungstenite::{connect, Message};
+
+#[derive(Deserialize)]
+struct History(pub Vec<String>);
 
 // The application state for the input-only window
 struct Model {
@@ -22,22 +26,89 @@ struct Model {
     // text field id
     input_id: egui::Id,
     // WebSocket for communicating with server/visualizer
-    ws_tx: Sender<String>,
+    ws_tx: Sender<String>,   // for sending commits
+    ws_rx: Receiver<String>, // for receiving history dumps
     client_id: String,
 }
 
 impl Model {
     fn new(cfg: Config) -> Self {
-        // Prepare the WebSocket client channel
-        let (ws_tx, ws_rx) = channel::<String>();
+        // Prepare WebSocket client channels: one for outgoing, one for incoming history
+        let (ws_tx, ws_out_rx) = channel::<String>();
+        let (ws_in_tx, ws_rx) = channel::<String>();
+        let (status_tx, _status_rx) = channel::<bool>();
+
         let ws_url = format!("ws://{}:{}", cfg.server.address, cfg.server.port);
 
         // spawn WebSocket client thread
         std::thread::spawn(move || {
-            let (mut ws, _) = connect(ws_url).expect("Failed to connect WebSocket"); // send every message received on ws_rx
-            for line in ws_rx {
-                let msg = Message::text(line);
-                let _ = ws.send(msg);
+            let mut ws_opt: Option<
+                tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
+            > = None;
+            let mut reconnect_delay = std::time::Duration::from_secs(1);
+            let max_reconnect_delay = std::time::Duration::from_secs(30);
+
+            loop {
+                // Try to connect if not connected
+                if ws_opt.is_none() {
+                    match connect(&ws_url) {
+                        Ok((socket, _)) => {
+                            // Set non-blocking mode on the TCP stream
+                            if let tungstenite::stream::MaybeTlsStream::Plain(tcp_stream) =
+                                socket.get_ref()
+                            {
+                                let _ = tcp_stream.set_nonblocking(true);
+                            }
+
+                            ws_opt = Some(socket);
+                            let _ = status_tx.send(true);
+                            reconnect_delay = std::time::Duration::from_secs(1);
+                        }
+                        Err(_) => {
+                            let _ = status_tx.send(false);
+                            std::thread::sleep(reconnect_delay);
+                            reconnect_delay =
+                                std::cmp::min(reconnect_delay * 2, max_reconnect_delay);
+                            continue;
+                        }
+                    }
+                }
+
+                // Process WebSocket messages
+                let mut should_reconnect = false;
+
+                if let Some(ref mut socket) = ws_opt {
+                    // Send pending messages
+                    while let Ok(commit) = ws_out_rx.try_recv() {
+                        if socket.send(Message::Text(commit.into())).is_err() {
+                            should_reconnect = true;
+                            break;
+                        }
+                    }
+
+                    // Read incoming messages
+                    if !should_reconnect {
+                        match socket.read() {
+                            Ok(Message::Text(utf8)) => {
+                                let _ = ws_in_tx.send(utf8.to_string());
+                            }
+                            Err(tungstenite::Error::Io(ref e))
+                                if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                            Err(_) => {
+                                should_reconnect = true;
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+
+                // Handle reconnection if needed
+                if should_reconnect {
+                    ws_opt = None;
+                    let _ = status_tx.send(false);
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
         });
 
@@ -50,6 +121,7 @@ impl Model {
             input_focus_next_frame: true,
             input_id: egui::Id::new("input_field"),
             ws_tx,
+            ws_rx,
             client_id,
         }
     }
@@ -98,12 +170,24 @@ impl eframe::App for Model {
 
                         // push entry into history
                         if response.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            // push the current line
-                            self.input_history.push(self.input_text.clone());
+                            // send commit to server
+                            let commit = format!("{}:{}\n", self.client_id, self.input_text);
+                            let _ = self.ws_tx.send(commit);
                             // clear the input field
                             self.input_text.clear();
                             // keep the focus so they can type again immediately
                             response.request_focus();
+                        } else {
+                            // Stream current text (without newline = not committed)
+                            let payload = format!("{}:{}", self.client_id, self.input_text);
+                            let _ = self.ws_tx.send(payload);
+                        }
+
+                        // Drain any incoming history dumps
+                        while let Ok(dump) = self.ws_rx.try_recv() {
+                            if let Ok(History(vec)) = serde_json::from_str::<History>(&dump) {
+                                self.input_history = vec;
+                            }
                         }
                     });
                 });
