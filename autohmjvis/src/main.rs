@@ -307,6 +307,13 @@ fn receive(model: &mut Model) {
 
     // Drain everything that arrived since last frame
     while let Ok(raw) = model.ws_rx.try_recv() {
+        if let Some((command, payload)) = raw.split_once('|') {
+            if command == "register warmup message with length" {
+                model.connections.insert(payload.to_string(), String::new());
+                continue;
+            }
+        }
+
         if let Some((id, text)) = raw.split_once(':') {
             // Update the connections map for live display
             if !text.is_empty() {
