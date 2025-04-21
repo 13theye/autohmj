@@ -15,17 +15,18 @@ use std::{
 };
 use tungstenite::{accept, Message};
 
-use autohmjvis::{config::Config, views::BackgroundManager};
-
-#[derive(Serialize)]
-struct History(pub Vec<String>);
+use autohmjvis::{
+    config::Config,
+    model::{History, HistoryItem},
+    views::BackgroundManager,
+};
 
 struct Model {
     background: BackgroundManager,
     text_layout: Layout,
 
-    // input
-    input_history: Vec<String>,
+    input_history: HashMap<usize, HistoryItem>,
+    current_input_idx: usize,
 
     main_font: Font,
 
@@ -183,7 +184,8 @@ fn model(app: &App) -> Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         text_layout,
 
-        input_history: Vec::new(),
+        input_history: HashMap::new(),
+        current_input_idx: 0,
 
         draw,
         draw_renderer,
@@ -225,6 +227,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 
     // Receive incoming datagrams and update connections
     receive(model);
+    history_cleanup(model);
 
     // Update & draw
     draw_output(app, model);
@@ -310,8 +313,9 @@ fn receive(model: &mut Model) {
 
             // If message ends with newline, it's a committed message
             if text.ends_with('\n') {
-                let entry = format!("{}:{}", id, text);
-                model.input_history.push(entry);
+                let entry = HistoryItem::new(id, text);
+                model.current_input_idx += 1;
+                model.input_history.insert(model.current_input_idx, entry);
                 history_updated = true;
             }
         }
@@ -320,31 +324,23 @@ fn receive(model: &mut Model) {
     // 2) broadcast the updated history if it was updated
     if history_updated {
         let dump = serde_json::to_string(&History(model.input_history.clone())).unwrap();
+        println!("{}", dump);
         for writer in &model.ws_writers {
             let _ = writer.send(dump.clone());
         }
     }
 }
 
-// ************************ History handling  *************************************
-struct HistoryItem {
-    pub sender: String,
-    pub message: String,
-    pub translation: Option<String>,
-}
-impl HistoryItem {
-    pub fn new(sender: &str, message: &str) -> Self {
-        Self {
-            sender: sender.to_owned(),
-            message: message.to_owned(),
-            translation: None,
+fn history_cleanup(model: &mut Model) {
+    if model.input_history.len() > 50 {
+        let mut keys: Vec<_> = model.input_history.keys().copied().collect();
+        keys.sort_unstable();
+
+        // Remove oldest messages, keeping latest 50
+        for key in &keys[0..keys.len() - 50] {
+            model.input_history.remove(key);
         }
     }
-}
-
-fn translate(message: &str) -> String {
-    // sends message to web translation API, returns the translated String
-    todo!();
 }
 
 // ************************ FPS and debug display  *************************************
