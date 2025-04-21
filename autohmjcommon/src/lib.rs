@@ -2,13 +2,13 @@
 //
 // data structures for Auto-HMJ
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub struct History(pub HashMap<usize, HistoryItem>);
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct HistoryItem {
     pub author: String,
     pub msg: String,
