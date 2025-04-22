@@ -34,10 +34,7 @@ impl Translate {
             .await;
 
         match result {
-            Ok(res) => {
-                println!("Target: {}, Result: {}", target_lang, res.data);
-                Some(res.data.trim_end().to_owned())
-            }
+            Ok(res) => Some(res.data.trim_end().to_owned()),
             Err(e) => {
                 eprintln!("Error in Translate: {}", e);
                 None

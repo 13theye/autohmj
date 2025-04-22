@@ -40,7 +40,7 @@ struct Model {
     // networking
     ws_rx: Receiver<String>,
     ws_writer_rx: Receiver<Sender<String>>, // new writers from accept thread
-    ws_writers: Vec<Sender<String>>,        // one perconnetion
+    ws_writers: Vec<Sender<String>>,        // one per connection
     connections: HashMap<String, String>,
 
     // Nannou API
@@ -105,7 +105,7 @@ fn model(app: &App) -> Model {
                     }
 
                     // avoid busy-spin
-                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    std::thread::sleep(std::time::Duration::from_millis(3));
                 }
             });
         }
@@ -312,6 +312,8 @@ fn render_and_post(app: &App, model: &mut Model) {
 fn receive(model: &mut Model) {
     // Pick up any brand-new client writers
     while let Ok(writer) = model.ws_writer_rx.try_recv() {
+        println!("Registered new client. Broadcasting history.");
+        broadcast_history(model, Some(&writer));
         model.ws_writers.push(writer);
     }
 
@@ -320,7 +322,7 @@ fn receive(model: &mut Model) {
     // Drain everything that arrived since last frame
     while let Ok(raw) = model.ws_rx.try_recv() {
         if let Some((command, payload)) = raw.split_once('|') {
-            if command == "register warmup message with length" {
+            if command == "register" {
                 model.connections.insert(payload.to_string(), String::new());
                 continue;
             }
@@ -347,7 +349,11 @@ fn receive(model: &mut Model) {
 
     // 2) broadcast the updated history if it was updated
     if history_updated {
-        broadcast_history(model);
+        println!(
+            "History updated for key {}, broadcasting history.",
+            model.next_history_idx - 1
+        );
+        broadcast_history(model, None);
     }
 }
 
@@ -368,22 +374,23 @@ fn add_history_item(model: &mut Model, item: HistoryItem) {
 }
 
 fn process_translations(model: &mut Model) {
-    if model.pending_translations.is_empty() {
-        return;
-    }
+    while !model.pending_translations.is_empty() {
+        if let Some(key) = model.pending_translations.pop() {
+            if let Some(item) = model.input_history.get(&key).cloned() {
+                if item.translation.is_none() && !item.msg.trim().is_empty() {
+                    let translate = model.translate.clone();
+                    let msg = item.msg.clone();
+                    let tx = model.translation_tx.clone();
 
-    if let Some(key) = model.pending_translations.pop() {
-        if let Some(item) = model.input_history.get(&key).cloned() {
-            if item.translation.is_none() && !item.msg.trim().is_empty() {
-                let translate = model.translate.clone();
-                let msg = item.msg.clone();
-                let tx = model.translation_tx.clone();
+                    // Spawn async task to handle translation
+                    model.translation_runtime.spawn(async move {
+                        let translation = translate.to_korean(&msg).await;
+                        let _ = tx.send((key, translation));
+                    });
 
-                // Spawn async task to handle translation
-                model.translation_runtime.spawn(async move {
-                    let translation = translate.to_english(&msg).await;
-                    let _ = tx.send((key, translation));
-                });
+                    // only start one new translation per frame
+                    break;
+                }
             }
         }
     }
@@ -392,16 +399,25 @@ fn process_translations(model: &mut Model) {
     while let Ok((key, translation)) = model.translation_rx.try_recv() {
         if let Some(item) = model.input_history.get_mut(&key) {
             item.translation = translation;
-            broadcast_history(model);
+            println!(
+                "Translation received for key {}, broadcasting history.",
+                key
+            );
+            broadcast_history(model, None);
         }
     }
 }
 
-fn broadcast_history(model: &Model) {
+fn broadcast_history(model: &Model, writer: Option<&Sender<String>>) {
     let dump = serde_json::to_string(&History(model.input_history.clone())).unwrap();
-    println!("{}", dump);
-    for writer in &model.ws_writers {
-        let _ = writer.send(dump.clone());
+    if let Some(w) = writer {
+        // send to specific
+        let _ = w.send(dump.clone());
+    } else {
+        // send to all
+        for w in &model.ws_writers {
+            let _ = w.send(dump.clone());
+        }
     }
 }
 
