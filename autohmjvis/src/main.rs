@@ -15,7 +15,7 @@ use std::{
 use tungstenite::{accept, Message};
 
 use autohmjcommon::{History, HistoryItem};
-use autohmjvis::{config::Config, views::BackgroundManager};
+use autohmjvis::{config::Config, services::Translate, views::BackgroundManager};
 
 // Number of entries in input_history
 const MAX_HISTORY: usize = 10;
@@ -27,6 +27,13 @@ struct Model {
     // Input history tracking
     input_history: BTreeMap<usize, HistoryItem>,
     next_history_idx: usize,
+
+    // Translation
+    translate: Translate,
+    pending_translations: Vec<usize>, // Keys of items awaiting translation
+    translation_runtime: tokio::runtime::Runtime,
+    translation_tx: Sender<(usize, Option<String>)>,
+    translation_rx: Receiver<(usize, Option<String>)>,
 
     main_font: Font,
 
@@ -104,6 +111,9 @@ fn model(app: &App) -> Model {
         }
     });
 
+    // Set up translation send/receive
+    let (translation_tx, translation_rx) = channel::<(usize, Option<String>)>();
+
     // --- Load Font for Nannou Draw ---
     // Assumes "assets/gulim.ttf" exists relative to the executable
     // or relative to the project root if running with `cargo run`
@@ -173,12 +183,17 @@ fn model(app: &App) -> Model {
         dst_format,
     );
 
+    // Text display style
     let text_layout_builder = nannou::text::layout::Builder::default();
     let text_layout = text_layout_builder
         .line_spacing(25.0)
         .wrap_by_word()
         .left_justify()
         .build();
+
+    // Set up translation runtime
+    let translation_runtime =
+        tokio::runtime::Runtime::new().expect("Failed to create Tokio translation runtime");
 
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
@@ -187,12 +202,18 @@ fn model(app: &App) -> Model {
         input_history: BTreeMap::new(),
         next_history_idx: 0,
 
+        translate: Translate::default(),
+        pending_translations: Vec::new(),
+        translation_runtime,
+        translation_tx,
+        translation_rx,
+
+        main_font,
+
         draw,
         draw_renderer,
         texture_main,
         texture_reshaper_main,
-
-        main_font,
 
         ws_rx,
         ws_writer_rx,
@@ -228,6 +249,9 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     // Receive incoming datagrams and update connections
     receive(model);
     history_cleanup(model);
+
+    // Initiate translations for any untranslated message in history
+    process_translations(model);
 
     // Update & draw
     draw_output(app, model);
@@ -323,11 +347,7 @@ fn receive(model: &mut Model) {
 
     // 2) broadcast the updated history if it was updated
     if history_updated {
-        let dump = serde_json::to_string(&History(model.input_history.clone())).unwrap();
-        println!("{}", dump);
-        for writer in &model.ws_writers {
-            let _ = writer.send(dump.clone());
-        }
+        broadcast_history(model);
     }
 }
 
@@ -340,8 +360,49 @@ fn history_cleanup(model: &mut Model) {
 }
 
 fn add_history_item(model: &mut Model, item: HistoryItem) {
-    model.input_history.insert(model.next_history_idx, item);
+    let key = model.next_history_idx;
+    model.input_history.insert(key, item);
     model.next_history_idx += 1;
+    // trigger async translation of the history item's message here.
+    model.pending_translations.push(key);
+}
+
+fn process_translations(model: &mut Model) {
+    if model.pending_translations.is_empty() {
+        return;
+    }
+
+    if let Some(key) = model.pending_translations.pop() {
+        if let Some(item) = model.input_history.get(&key).cloned() {
+            if item.translation.is_none() && !item.msg.trim().is_empty() {
+                let translate = model.translate.clone();
+                let msg = item.msg.clone();
+                let tx = model.translation_tx.clone();
+
+                // Spawn async task to handle translation
+                model.translation_runtime.spawn(async move {
+                    let translation = translate.to_english(&msg).await;
+                    let _ = tx.send((key, translation));
+                });
+            }
+        }
+    }
+
+    // check for completed translations
+    while let Ok((key, translation)) = model.translation_rx.try_recv() {
+        if let Some(item) = model.input_history.get_mut(&key) {
+            item.translation = translation;
+            broadcast_history(model);
+        }
+    }
+}
+
+fn broadcast_history(model: &Model) {
+    let dump = serde_json::to_string(&History(model.input_history.clone())).unwrap();
+    println!("{}", dump);
+    for writer in &model.ws_writers {
+        let _ = writer.send(dump.clone());
+    }
 }
 
 // ************************ FPS and debug display  *************************************
