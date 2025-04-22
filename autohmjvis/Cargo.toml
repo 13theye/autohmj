@@ -5,6 +5,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+autohmjcommon = { path = "../autohmjcommon" }
 hangeul = "0.4.0"
 rustkorean = "1.1.2"
 nannou = "0.19"

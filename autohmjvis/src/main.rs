@@ -5,9 +5,8 @@
 
 use nannou::{prelude::*, text::*};
 use nnpipe::*;
-use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs,
     net::TcpListener,
     sync::mpsc::{channel, Receiver, Sender},
@@ -15,18 +14,19 @@ use std::{
 };
 use tungstenite::{accept, Message};
 
-use autohmjvis::{
-    config::Config,
-    model::{History, HistoryItem},
-    views::BackgroundManager,
-};
+use autohmjcommon::{History, HistoryItem};
+use autohmjvis::{config::Config, views::BackgroundManager};
+
+// Number of entries in input_history
+const MAX_HISTORY: usize = 10;
 
 struct Model {
     background: BackgroundManager,
     text_layout: Layout,
 
-    input_history: HashMap<usize, HistoryItem>,
-    current_input_idx: usize,
+    // Input history tracking
+    input_history: BTreeMap<usize, HistoryItem>,
+    next_history_idx: usize,
 
     main_font: Font,
 
@@ -184,8 +184,8 @@ fn model(app: &App) -> Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         text_layout,
 
-        input_history: HashMap::new(),
-        current_input_idx: 0,
+        input_history: BTreeMap::new(),
+        next_history_idx: 0,
 
         draw,
         draw_renderer,
@@ -314,8 +314,8 @@ fn receive(model: &mut Model) {
             // If message ends with newline, it's a committed message
             if text.ends_with('\n') {
                 let entry = HistoryItem::new(id, text);
-                model.current_input_idx += 1;
-                model.input_history.insert(model.current_input_idx, entry);
+                add_history_item(model, entry);
+
                 history_updated = true;
             }
         }
@@ -332,15 +332,16 @@ fn receive(model: &mut Model) {
 }
 
 fn history_cleanup(model: &mut Model) {
-    if model.input_history.len() > 50 {
-        let mut keys: Vec<_> = model.input_history.keys().copied().collect();
-        keys.sort_unstable();
-
-        // Remove oldest messages, keeping latest 50
-        for key in &keys[0..keys.len() - 50] {
-            model.input_history.remove(key);
+    while model.input_history.len() > MAX_HISTORY {
+        if let Some(smallest_key) = model.input_history.keys().next().copied() {
+            model.input_history.remove(&smallest_key);
         }
     }
+}
+
+fn add_history_item(model: &mut Model, item: HistoryItem) {
+    model.input_history.insert(model.next_history_idx, item);
+    model.next_history_idx += 1;
 }
 
 // ************************ FPS and debug display  *************************************
