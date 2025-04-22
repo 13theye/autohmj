@@ -49,8 +49,8 @@ impl Model {
             let mut ws_opt: Option<
                 tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
             > = None;
-            let mut reconnect_delay = std::time::Duration::from_secs(1);
-            let max_reconnect_delay = std::time::Duration::from_secs(30);
+            let mut reconnect_delay = std::time::Duration::from_millis(500);
+            let max_reconnect_delay = std::time::Duration::from_secs(10);
 
             loop {
                 // Try to connect if not connected
@@ -70,7 +70,7 @@ impl Model {
 
                             ws_opt = Some(socket);
                             let _ = status_tx.send(true);
-                            reconnect_delay = std::time::Duration::from_secs(1);
+                            reconnect_delay = std::time::Duration::from_millis(100);
                         }
                         Err(_) => {
                             let _ = status_tx.send(false);
@@ -116,7 +116,7 @@ impl Model {
                     let _ = status_tx.send(false);
                 }
 
-                std::thread::sleep(std::time::Duration::from_millis(10));
+                std::thread::sleep(std::time::Duration::from_millis(3));
             }
         });
 
@@ -193,7 +193,12 @@ impl eframe::App for Model {
                             if let Ok(History(full_history)) =
                                 serde_json::from_str::<History>(&dump)
                             {
+                                println!(
+                                    "Received history update with {} items",
+                                    full_history.len()
+                                );
                                 self.input_history = full_history;
+                                //println!("      {:?}", self.input_history);
                             }
                         }
                     });
@@ -217,6 +222,7 @@ impl eframe::App for Model {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .stick_to_bottom(true)
+                    .id_salt("history_scroll")
                     .show(ui, |ui| {
                         // clickable for focus
                         let history_bg_rect = ui.available_rect_before_wrap();
@@ -233,21 +239,50 @@ impl eframe::App for Model {
 
                         // Display each entry in history
                         for entry in self.input_history.values() {
-                            let display: String = {
-                                if entry.author == self.client_id {
-                                    format!("You: {}", entry.msg)
-                                } else {
-                                    format!("{}: {}", entry.author, entry.msg)
-                                }
+                            // First add the author name
+                            let author_text = if entry.author == self.client_id {
+                                "You:"
+                            } else {
+                                &entry.author
                             };
-                            ui.label(
-                                egui::RichText::new(display)
-                                    .monospace()
-                                    .size(20.0)
-                                    .color(egui::Color32::WHITE),
-                            );
+
+                            ui.horizontal(|ui| {
+                                // Author name
+                                ui.label(
+                                    egui::RichText::new(author_text)
+                                        .monospace()
+                                        .size(20.0)
+                                        .color(egui::Color32::WHITE)
+                                        .strong(),
+                                );
+                                ui.add_space(10.0);
+                                // Message with indentation
+                                ui.vertical(|ui| {
+                                    // Original message
+                                    ui.label(
+                                        egui::RichText::new(entry.msg.trim_end())
+                                            .monospace()
+                                            .size(20.0)
+                                            .color(egui::Color32::WHITE),
+                                    );
+
+                                    // Translation if available
+                                    if let Some(trans) = &entry.translation {
+                                        ui.label(
+                                            egui::RichText::new(format!("({})", trans))
+                                                .monospace()
+                                                .size(16.0)
+                                                .color(egui::Color32::from_rgb(150, 150, 150))
+                                                .italics(),
+                                        );
+                                        ui.add_space(10.0);
+                                    } else {
+                                        ui.add_space(29.0);
+                                    }
+                                });
+                            });
                         }
-                    });
+                    })
             });
 
         // After the UI is built, stream the current text live:
