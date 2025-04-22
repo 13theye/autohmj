@@ -1,25 +1,26 @@
 // src/main.rs
 //
-// auto-hunminjeongak
+// auto-hunminjeongak client
 //
 // handling user input
 
-use autohmj::config::Config;
+use autohmjclient::config::Config;
 use eframe::{egui, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
-use serde::Deserialize;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::{
+    collections::BTreeMap,
+    sync::mpsc::{channel, Receiver, Sender},
+};
 use tungstenite::{connect, Message};
 
-#[derive(Deserialize)]
-struct History(pub Vec<String>);
+use autohmjcommon::{History, HistoryItem};
 
 // The application state for the input-only window
 struct Model {
     // input from the user
     input_text: String,
     // History of submitted lines
-    input_history: Vec<String>,
+    input_history: BTreeMap<usize, HistoryItem>,
     // Flag to request focus next frame
     input_focus_next_frame: bool,
     // text field id
@@ -121,7 +122,7 @@ impl Model {
 
         Self {
             input_text: String::new(),
-            input_history: Vec::new(),
+            input_history: BTreeMap::new(),
             input_focus_next_frame: true,
             input_id: egui::Id::new("input_field"),
             ws_tx,
@@ -189,8 +190,10 @@ impl eframe::App for Model {
 
                         // Drain any incoming history dumps
                         while let Ok(dump) = self.ws_rx.try_recv() {
-                            if let Ok(History(vec)) = serde_json::from_str::<History>(&dump) {
-                                self.input_history = vec;
+                            if let Ok(History(full_history)) =
+                                serde_json::from_str::<History>(&dump)
+                            {
+                                self.input_history = full_history;
                             }
                         }
                     });
@@ -229,22 +232,20 @@ impl eframe::App for Model {
                         }
 
                         // Display each entry in history
-                        for line in &self.input_history {
-                            if let Some((id, history_line)) = line.split_once(':') {
-                                let display: String = {
-                                    if id == self.client_id {
-                                        format!("You: {}", history_line)
-                                    } else {
-                                        format!("{}: {}", id, history_line)
-                                    }
-                                };
-                                ui.label(
-                                    egui::RichText::new(display)
-                                        .monospace()
-                                        .size(20.0)
-                                        .color(egui::Color32::WHITE),
-                                );
-                            }
+                        for entry in self.input_history.values() {
+                            let display: String = {
+                                if entry.author == self.client_id {
+                                    format!("You: {}", entry.msg)
+                                } else {
+                                    format!("{}: {}", entry.author, entry.msg)
+                                }
+                            };
+                            ui.label(
+                                egui::RichText::new(display)
+                                    .monospace()
+                                    .size(20.0)
+                                    .color(egui::Color32::WHITE),
+                            );
                         }
                     });
             });

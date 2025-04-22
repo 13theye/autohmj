@@ -419,9 +419,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
-name = "autohmj"
+name = "autohmjclient"
 version = "0.1.0"
 dependencies = [
+ "autohmjcommon",
  "eframe",
  "hangeul",
  "rand 0.8.5",
@@ -430,6 +431,14 @@ dependencies = [
  "serde_json",
  "toml",
  "tungstenite",
+]
+
+[[package]]
+name = "autohmjcommon"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

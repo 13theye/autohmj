@@ -1,10 +1,11 @@
 [package]
-name = "autohmj"
+name = "autohmjclient"
 authors = ["13th Eye <jjhh@13theye.com>"]
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+autohmjcommon = { path = "../autohmjcommon" }
 eframe = "^0.31"
 hangeul = "0.4"
 rustkorean = "1.1"
@@ -15,9 +16,9 @@ toml = "0.8"
 tungstenite = "0.26"
 
 [lib]
-name = "autohmj"
+name = "autohmjclient"
 path = "src/lib.rs"
 
 [[bin]]
-name = "autohmj"
+name = "autohmjclient"
 path = "src/main.rs"
