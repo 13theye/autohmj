@@ -3,10 +3,10 @@
 // data structures for Auto-HMJ
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Deserialize, Serialize)]
-pub struct History(pub HashMap<usize, HistoryItem>);
+pub struct History(pub BTreeMap<usize, HistoryItem>);
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct HistoryItem {
