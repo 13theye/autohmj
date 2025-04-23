@@ -30,7 +30,10 @@ fps = 30
 
 [paths]
 #paths are relative to executable directory
+# directory to save recordings:
 output_directory = "frames"
+# directory for key.toml:
+auth = "auth"
 
 [speed]
 bpm = 120

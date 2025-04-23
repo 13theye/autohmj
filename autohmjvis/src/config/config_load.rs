@@ -21,6 +21,11 @@ pub struct Config {
     pub server: ServerConfig,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AuthConfig {
+    pub google: GoogleConfig,
+}
+
 impl Config {
     /************************* Config file loading ********************/
 
@@ -101,5 +106,29 @@ impl Config {
         };
 
         path.to_string_lossy().into_owned() // Convert PathBuf to String safely
+    }
+}
+
+impl AuthConfig {
+    pub fn load(dir: &str) -> Option<Self> {
+        let dir_path = if Path::new(dir).is_absolute() {
+            PathBuf::from(dir)
+        } else {
+            // If path is relative, resolve it relative to the executable or working directory
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .map(|exe_dir| exe_dir.join(dir))
+                .unwrap_or_else(|| PathBuf::from(dir))
+        };
+
+        let path = dir_path.join("key.toml");
+
+        if path.exists() {
+            let content = fs::read_to_string(path).ok()?;
+            toml::from_str(&content).ok()
+        } else {
+            None
+        }
     }
 }

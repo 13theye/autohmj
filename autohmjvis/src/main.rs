@@ -15,7 +15,11 @@ use std::{
 use tungstenite::{accept, Message};
 
 use autohmjcommon::{History, HistoryItem};
-use autohmjvis::{config::Config, services::Translate, views::BackgroundManager};
+use autohmjvis::{
+    config::{AuthConfig, Config},
+    services::{Gemma, Translate},
+    views::BackgroundManager,
+};
 
 // Number of entries in input_history
 const MAX_HISTORY: usize = 10;
@@ -34,6 +38,9 @@ struct Model {
     translation_runtime: tokio::runtime::Runtime,
     translation_tx: Sender<(usize, Option<String>)>,
     translation_rx: Receiver<(usize, Option<String>)>,
+
+    // AI
+    gemma: Gemma,
 
     main_font: Font,
 
@@ -61,6 +68,8 @@ struct Model {
 fn model(app: &App) -> Model {
     // Load config
     let config = Config::load().expect("\nAuto훈민정음: FAILED TO LOAD CONFIG.TOML\n");
+    let auth_config =
+        AuthConfig::load(&config.paths.auth).expect("\nAuto훈민정음: FAILED TO LOAD KEY.TOML\n");
 
     // Set up WebSocket
     let (ws_tx, ws_rx) = channel::<String>();
@@ -208,6 +217,8 @@ fn model(app: &App) -> Model {
         translation_tx,
         translation_rx,
 
+        gemma: Gemma::new(auth_config.google.api_key),
+
         main_font,
 
         draw,
@@ -307,6 +318,8 @@ fn render_and_post(app: &App, model: &mut Model) {
         &model.draw,
     );
 }
+
+// ************************ AI API *************************************************
 
 // ************************ Networking *************************************************
 fn receive(model: &mut Model) {

@@ -37,9 +37,15 @@ pub struct SpeedConfig {
 #[derive(Debug, Deserialize)]
 pub struct PathConfig {
     pub output_directory: String,
+    pub auth: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct OscConfig {
     pub rx_port: u16,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GoogleConfig {
+    pub api_key: String,
 }
