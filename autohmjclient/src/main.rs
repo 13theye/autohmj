@@ -130,11 +130,10 @@ impl Model {
             client_id: client_id.clone(),
         }
     }
-}
 
-impl eframe::App for Model {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Build the UI
+    /**************************** Window components **************************************** */
+    fn build_input_frame(&mut self, ctx: &egui::Context) {
+        // Define UI style
         let bottom_frame = egui::Frame {
             inner_margin: egui::Margin {
                 left: 10,
@@ -145,6 +144,8 @@ impl eframe::App for Model {
             fill: egui::Color32::BLACK,
             ..Default::default()
         };
+
+        // Build the UI
         egui::TopBottomPanel::bottom("input_panel")
             .frame(bottom_frame)
             .resizable(false)
@@ -204,8 +205,10 @@ impl eframe::App for Model {
                     });
                 });
             });
+    }
 
-        // History panel
+    fn build_history_frame(&mut self, ctx: &egui::Context) {
+        // Define UI Style
         let history_frame = egui::Frame {
             fill: egui::Color32::BLACK,
             inner_margin: egui::Margin {
@@ -216,6 +219,8 @@ impl eframe::App for Model {
             },
             ..Default::default()
         };
+
+        // build UI
         egui::CentralPanel::default()
             .frame(history_frame)
             .show(ctx, |ui| {
@@ -284,6 +289,14 @@ impl eframe::App for Model {
                         }
                     })
             });
+    }
+}
+
+impl eframe::App for Model {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Display the major UI elements
+        self.build_input_frame(ctx);
+        self.build_history_frame(ctx);
 
         // After the UI is built, stream the current text live:
         let payload = format!("{}:{}", self.client_id, self.input_text);
@@ -313,6 +326,8 @@ fn main() {
     )
     .unwrap();
 }
+
+/**************************** Text display style functions ***************************** */
 
 fn make_gulim_fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
