@@ -246,9 +246,9 @@ impl Model {
                         for entry in self.input_history.values() {
                             // First add the author name
                             let author_text = if entry.author == self.client_id {
-                                "You:"
+                                "You:".to_string()
                             } else {
-                                &entry.author
+                                format!("{}:", &entry.author)
                             };
 
                             ui.horizontal(|ui| {
