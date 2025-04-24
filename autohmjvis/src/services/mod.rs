@@ -1,5 +1,5 @@
 pub mod ai;
-pub use ai::Gemma;
+pub use ai::GemmaInstance;
 
 pub mod translate;
-pub use translate::Translate;
+pub use translate::{Translate, TranslationType};

@@ -32,8 +32,10 @@ fps = 30
 #paths are relative to executable directory
 # directory to save recordings:
 output_directory = "frames"
-# directory for key.toml:
+# directory for key.toml: secret keys
 auth = "auth"
+# directory for gemma.toml: Gemma AI config:
+gemma = "gemma"
 
 [speed]
 bpm = 120

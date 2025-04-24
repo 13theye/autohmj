@@ -6,6 +6,13 @@
 use deeplx::{Config, DeepLX};
 
 #[derive(Clone)]
+pub enum TranslationType {
+    ToEnglish,
+    ToFrench,
+    ToKorean,
+}
+
+#[derive(Clone)]
 pub struct Translate {
     pub translator: DeepLX,
 }
@@ -48,5 +55,9 @@ impl Translate {
 
     pub async fn to_korean(&self, input: &str) -> Option<String> {
         self.get_translation(input, "auto", "ko").await
+    }
+
+    pub async fn to_french(&self, input: &str) -> Option<String> {
+        self.get_translation(input, "auto", "fr").await
     }
 }

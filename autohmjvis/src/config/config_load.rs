@@ -26,6 +26,12 @@ pub struct AuthConfig {
     pub google: GoogleConfig,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct GemmaConfig {
+    pub persona_1: PersonaConfig,
+    pub persona_2: PersonaConfig,
+}
+
 impl Config {
     /************************* Config file loading ********************/
 
@@ -58,24 +64,6 @@ impl Config {
     }
 
     /************************* Resolving paths to the types needed in app ********************/
-
-    /*
-    pub fn resolve_project_path(&self) -> PathBuf {
-        if Path::new(&self.paths.project_file).is_absolute() {
-            PathBuf::from(&self.paths.project_file)
-        } else {
-            // If path is relative, resolve it relative to the executable or working directory
-            if let Some(exe_dir) = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-            {
-                exe_dir.join(&self.paths.project_file)
-            } else {
-                PathBuf::from(&self.paths.project_file)
-            }
-        }
-    }
-    */
 
     pub fn resolve_output_dir(&self) -> PathBuf {
         if Path::new(&self.paths.output_directory).is_absolute() {
@@ -123,6 +111,30 @@ impl AuthConfig {
         };
 
         let path = dir_path.join("key.toml");
+
+        if path.exists() {
+            let content = fs::read_to_string(path).ok()?;
+            toml::from_str(&content).ok()
+        } else {
+            None
+        }
+    }
+}
+
+impl GemmaConfig {
+    pub fn load(dir: &str) -> Option<Self> {
+        let dir_path = if Path::new(dir).is_absolute() {
+            PathBuf::from(dir)
+        } else {
+            // If path is relative, resolve it relative to the executable or working directory
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .map(|exe_dir| exe_dir.join(dir))
+                .unwrap_or_else(|| PathBuf::from(dir))
+        };
+
+        let path = dir_path.join("gemma.toml");
 
         if path.exists() {
             let content = fs::read_to_string(path).ok()?;

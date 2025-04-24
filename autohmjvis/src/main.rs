@@ -16,13 +16,13 @@ use tungstenite::{accept, Message};
 
 use autohmjcommon::{History, HistoryItem};
 use autohmjvis::{
-    config::{AuthConfig, Config},
-    services::{Gemma, Translate},
+    config::{AuthConfig, Config, GemmaConfig},
+    services::{ai, GemmaInstance, Translate, TranslationType},
     views::BackgroundManager,
 };
 
 // Number of entries in input_history
-const MAX_HISTORY: usize = 10;
+const MAX_HISTORY: usize = 100;
 
 struct Model {
     background: BackgroundManager,
@@ -36,15 +36,24 @@ struct Model {
     translate: Translate,
     pending_translations: Vec<usize>, // Keys of items awaiting translation
     translation_runtime: tokio::runtime::Runtime,
+
+    // Async sender/receivers
     translation_tx: Sender<(usize, Option<String>)>,
     translation_rx: Receiver<(usize, Option<String>)>,
+    translation_type: TranslationType,
 
     // AI
-    gemma: Gemma,
+    gemma_1: GemmaInstance,
+    gemma_1_tx: Sender<Option<String>>,
+    gemma_1_rx: Receiver<Option<String>>,
+    gemma_2: GemmaInstance,
+    gemma_2_tx: Sender<Option<String>>,
+    gemma_2_rx: Receiver<Option<String>>,
+    gemma_runtime: tokio::runtime::Runtime,
 
     main_font: Font,
 
-    // networking
+    // WebSockets
     ws_rx: Receiver<String>,
     ws_writer_rx: Receiver<Sender<String>>, // new writers from accept thread
     ws_writers: Vec<Sender<String>>,        // one per connection
@@ -70,6 +79,8 @@ fn model(app: &App) -> Model {
     let config = Config::load().expect("\nAuto훈민정음: FAILED TO LOAD CONFIG.TOML\n");
     let auth_config =
         AuthConfig::load(&config.paths.auth).expect("\nAuto훈민정음: FAILED TO LOAD KEY.TOML\n");
+    let gemma_config = GemmaConfig::load(&config.paths.gemma)
+        .expect("\nAuto훈민정음: FAILED TO LOAD GEMMA.TOML\n");
 
     // Set up WebSocket
     let (ws_tx, ws_rx) = channel::<String>();
@@ -122,6 +133,8 @@ fn model(app: &App) -> Model {
 
     // Set up translation send/receive
     let (translation_tx, translation_rx) = channel::<(usize, Option<String>)>();
+    let (gemma_1_tx, gemma_1_rx) = channel::<Option<String>>();
+    let (gemma_2_tx, gemma_2_rx) = channel::<Option<String>>();
 
     // --- Load Font for Nannou Draw ---
     // Assumes "assets/gulim.ttf" exists relative to the executable
@@ -204,6 +217,9 @@ fn model(app: &App) -> Model {
     let translation_runtime =
         tokio::runtime::Runtime::new().expect("Failed to create Tokio translation runtime");
 
+    // Set up Gemma runtime
+    let gemma_runtime = tokio::runtime::Runtime::new().expect("Failed to create Gemma runtime");
+
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         text_layout,
@@ -214,10 +230,26 @@ fn model(app: &App) -> Model {
         translate: Translate::default(),
         pending_translations: Vec::new(),
         translation_runtime,
+        translation_type: TranslationType::ToKorean,
+
         translation_tx,
         translation_rx,
 
-        gemma: Gemma::new(auth_config.google.api_key),
+        gemma_1: GemmaInstance::new(
+            gemma_config.persona_1.id,
+            gemma_config.persona_1.prompt,
+            auth_config.google.api_key.clone(),
+        ),
+        gemma_2: GemmaInstance::new(
+            gemma_config.persona_2.id,
+            gemma_config.persona_2.prompt,
+            auth_config.google.api_key,
+        ),
+        gemma_1_tx,
+        gemma_1_rx,
+        gemma_2_tx,
+        gemma_2_rx,
+        gemma_runtime,
 
         main_font,
 
@@ -259,6 +291,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 
     // Receive incoming datagrams and update connections
     receive(model);
+    receive_gemmas(model);
     history_cleanup(model);
 
     // Initiate translations for any untranslated message in history
@@ -320,8 +353,69 @@ fn render_and_post(app: &App, model: &mut Model) {
 }
 
 // ************************ AI API *************************************************
+fn send_to_gemma(model: &mut Model, persona: GemmaPersona, message: &str) {
+    let gemma = match persona {
+        GemmaPersona::Gemma1 => &model.gemma_1,
+        GemmaPersona::Gemma2 => &model.gemma_2,
+    };
+    let gemma_handle = gemma.create_handle();
+    let history = &model.input_history;
+    let contents = ai::generate_contents(&gemma.id, message, &gemma.prompt, history);
+    let client = gemma.client.clone();
+
+    let tx = match persona {
+        GemmaPersona::Gemma1 => model.gemma_1_tx.clone(),
+        GemmaPersona::Gemma2 => model.gemma_2_tx.clone(),
+    };
+
+    model.gemma_runtime.spawn(async move {
+        println!("Inside async task");
+
+        match gemma_handle.generate_response(contents, client).await {
+            Ok(response) => {
+                println!("Received successful response of length {}", response.len());
+
+                let gemma_msg = format!("Gemma: {}\n", response);
+                println!("{}", gemma_msg);
+                let _ = tx.send(Some(gemma_msg));
+            }
+            Err(e) => {
+                eprintln!("Gemma API error: {}", e);
+                if let Some(source) = e.source() {
+                    eprintln!("Error source: {}", source);
+                }
+            }
+        }
+    });
+}
+
+fn receive_gemmas(model: &mut Model) {
+    // check for Gemma responses
+    while let Ok(response) = model.gemma_1_rx.try_recv() {
+        if let Some(raw) = response {
+            let author = "Gemma 1";
+            if let Some((_, message)) = raw.split_once(": ") {
+                let history_item = HistoryItem::new(author, message);
+                add_history_item(model, history_item);
+                broadcast_history(model, None);
+            }
+        }
+    }
+
+    while let Ok(response) = model.gemma_2_rx.try_recv() {
+        if let Some(raw) = response {
+            let author = "Gemma 2";
+            if let Some((_, message)) = raw.split_once(": ") {
+                let history_item = HistoryItem::new(author, message);
+                add_history_item(model, history_item);
+                broadcast_history(model, None);
+            }
+        }
+    }
+}
 
 // ************************ Networking *************************************************
+
 fn receive(model: &mut Model) {
     // Pick up any brand-new client writers
     while let Ok(writer) = model.ws_writer_rx.try_recv() {
@@ -353,8 +447,8 @@ fn receive(model: &mut Model) {
             // If message ends with newline, it's a committed message
             if text.ends_with('\n') {
                 let entry = HistoryItem::new(id, text);
+                send_to_gemma(model, GemmaPersona::Gemma2, &entry.msg);
                 add_history_item(model, entry);
-
                 history_updated = true;
             }
         }
@@ -395,9 +489,15 @@ fn process_translations(model: &mut Model) {
                     let msg = item.msg.clone();
                     let tx = model.translation_tx.clone();
 
+                    let translation_type = model.translation_type.clone();
+
                     // Spawn async task to handle translation
                     model.translation_runtime.spawn(async move {
-                        let translation = translate.to_korean(&msg).await;
+                        let translation = match translation_type {
+                            TranslationType::ToKorean => translate.to_korean(&msg).await,
+                            TranslationType::ToEnglish => translate.to_english(&msg).await,
+                            TranslationType::ToFrench => translate.to_french(&msg).await,
+                        };
                         let _ = tx.send((key, translation));
                     });
 
@@ -421,9 +521,9 @@ fn process_translations(model: &mut Model) {
     }
 }
 
-fn broadcast_history(model: &Model, writer: Option<&Sender<String>>) {
+fn broadcast_history(model: &Model, specific_target: Option<&Sender<String>>) {
     let dump = serde_json::to_string(&History(model.input_history.clone())).unwrap();
-    if let Some(w) = writer {
+    if let Some(w) = specific_target {
         // send to specific
         let _ = w.send(dump.clone());
     } else {
@@ -510,6 +610,15 @@ fn draw_fps(model: &Model) {
 
 fn key_pressed(app: &App, model: &mut Model, key: Key) {
     match key {
+        Key::Key1 => {
+            model.translation_type = TranslationType::ToKorean;
+        }
+        Key::Key2 => {
+            model.translation_type = TranslationType::ToEnglish;
+        }
+        Key::Key3 => {
+            model.translation_type = TranslationType::ToFrench;
+        }
         Key::P => {
             model.verbose = !model.verbose;
             model.fps.start(app.time);
@@ -519,4 +628,9 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
         }
         _ => {}
     }
+}
+
+enum GemmaPersona {
+    Gemma1,
+    Gemma2,
 }

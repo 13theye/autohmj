@@ -38,6 +38,7 @@ pub struct SpeedConfig {
 pub struct PathConfig {
     pub output_directory: String,
     pub auth: String,
+    pub gemma: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,4 +49,10 @@ pub struct OscConfig {
 #[derive(Debug, Deserialize)]
 pub struct GoogleConfig {
     pub api_key: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PersonaConfig {
+    pub id: String,
+    pub prompt: String,
 }
