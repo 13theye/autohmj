@@ -1,6 +1,6 @@
 // src/services/translate.rs
 //
-// uses the Rust Translators crate to access Google Translate.
+// uses the external DeepLX crate to access DeepLX translation
 //
 //
 use deeplx::{Config, DeepLX};

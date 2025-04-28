@@ -9,7 +9,11 @@ use std::{
     collections::{BTreeMap, HashMap},
     fs,
     net::TcpListener,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{channel, Receiver, Sender},
+        Arc,
+    },
     time::Instant,
 };
 use tungstenite::{accept, Message};
@@ -36,7 +40,7 @@ struct Model {
     // Translation
     translate: Translate,
     pending_translations: Vec<usize>, // Keys of items awaiting translation
-    translation_runtime: tokio::runtime::Runtime,
+    translation_runtime: Option<tokio::runtime::Runtime>,
 
     // Async sender/receivers
     translation_tx: Sender<(usize, Option<String>)>,
@@ -51,7 +55,7 @@ struct Model {
     gemma_2_tx: Sender<Option<String>>,
     gemma_2_rx: Receiver<Option<String>>,
 
-    gemma_runtime: tokio::runtime::Runtime,
+    gemma_runtime: Option<tokio::runtime::Runtime>,
 
     main_font: Font,
 
@@ -74,6 +78,9 @@ struct Model {
 
     // When on, displays more verbose messages in terminal
     verbose: bool,
+
+    // graceful shutdown
+    ws_shutdown_flag: Arc<AtomicBool>,
 }
 
 fn model(app: &App) -> Model {
@@ -88,49 +95,83 @@ fn model(app: &App) -> Model {
     let (ws_tx, ws_rx) = channel::<String>();
     let (writer_tx, ws_writer_rx) = channel::<Sender<String>>();
     let listen_addr = format!("0.0.0.0:{}", config.server.port);
+
+    // Set up Shutdown Flag
+    let ws_shutdown_flag = Arc::new(AtomicBool::new(false));
+    let ws_shutdown_flag_clone = ws_shutdown_flag.clone();
+
     std::thread::spawn(move || {
         let listener = TcpListener::bind(&listen_addr).expect("Failed to bind WebSocket listener");
 
-        // for each new TCP connection:
-        for stream in listener.incoming().flatten() {
-            let mut ws = accept(stream).expect("WebSocket handshake failed");
+        // Make listener non-blocking so we can check shutdown flag
+        listener
+            .set_nonblocking(true)
+            .expect("Failed to set non-blocking mode");
 
-            // create a channel for this client's outbound messages
-            let (out_tx, out_rx) = channel::<String>();
+        while !ws_shutdown_flag_clone.load(Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    match accept(stream) {
+                        Ok(mut ws) => {
+                            // create a channel for this client's outbound messages
+                            let (out_tx, out_rx) = channel::<String>();
 
-            // tell main thread that there's a new client that can be written to
-            writer_tx.send(out_tx.clone()).unwrap();
+                            // tell main thread that there's a new client that can be written to
+                            writer_tx.send(out_tx.clone()).unwrap();
 
-            let in_tx = ws_tx.clone();
+                            let in_tx = ws_tx.clone();
 
-            // set nonblocking so read_message() returns WouldBlock
-            ws.get_mut().set_nonblocking(true).unwrap();
+                            // set nonblocking so read_message() returns WouldBlock
+                            ws.get_mut().set_nonblocking(true).unwrap();
 
-            // Now run a simple read/write loop
-            std::thread::spawn(move || {
-                loop {
-                    // 1. Read commits
-                    match ws.read() {
-                        Ok(Message::Text(utf8)) => {
-                            let line = utf8.to_string();
-                            let _ = in_tx.send(line);
+                            // Create a clone of the shutdown flag for this client thread
+                            let client_shutdown_flag = ws_shutdown_flag_clone.clone();
+
+                            // Spawn client handler thread
+                            std::thread::spawn(move || {
+                                while !client_shutdown_flag.load(Ordering::SeqCst) {
+                                    // 1. Read commits
+                                    match ws.read() {
+                                        Ok(Message::Text(utf8)) => {
+                                            let line = utf8.to_string();
+                                            let _ = in_tx.send(line);
+                                        }
+                                        Err(tungstenite::Error::Io(ref e))
+                                            if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                                        Err(_) => break, // connection closed or error
+                                        _ => {}
+                                    }
+
+                                    // 2. Drain outbound history messages
+                                    while let Ok(msg) = out_rx.try_recv() {
+                                        let _ = ws.send(Message::Text(msg.into()));
+                                    }
+
+                                    // avoid busy-spin
+                                    std::thread::sleep(std::time::Duration::from_millis(3));
+                                }
+
+                                println!("WebSocket client handler shutting down")
+                            });
                         }
-                        Err(tungstenite::Error::Io(ref e))
-                            if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                        Err(_) => break, // connection closed or error
-                        _ => {}
+                        Err(e) => eprintln!("WebSocket handshake failed: {}", e),
                     }
-
-                    // 2. Drain outbound history messages
-                    while let Ok(msg) = out_rx.try_recv() {
-                        let _ = ws.send(Message::Text(msg.into()));
-                    }
-
-                    // avoid busy-spin
-                    std::thread::sleep(std::time::Duration::from_millis(3));
                 }
-            });
+
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // No connection available, this is normal with non-blocking sockets
+                    // Sleep briefly to avoid tight loop
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+
+                Err(e) => {
+                    // Real error
+                    eprintln!("Error accepting connection: {}", e);
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
         }
+        println!("WebSocket listener shutting down");
     });
 
     // Set up translation send/receive
@@ -231,7 +272,7 @@ fn model(app: &App) -> Model {
 
         translate: Translate::default(),
         pending_translations: Vec::new(),
-        translation_runtime,
+        translation_runtime: Some(translation_runtime),
         translation_type: TranslationType::ToKorean,
 
         translation_tx,
@@ -251,7 +292,7 @@ fn model(app: &App) -> Model {
         gemma_1_rx,
         gemma_2_tx,
         gemma_2_rx,
-        gemma_runtime,
+        gemma_runtime: Some(gemma_runtime),
 
         main_font,
 
@@ -270,6 +311,8 @@ fn model(app: &App) -> Model {
         fps: Fps::default(),
 
         verbose: false,
+
+        ws_shutdown_flag,
     }
 }
 
@@ -508,25 +551,27 @@ fn send_to_gemma(model: &mut Model, persona: GemmaPersona, message: &str) {
         GemmaPersona::Gemma2 => model.gemma_2_tx.clone(),
     };
 
-    model.gemma_runtime.spawn(async move {
-        println!("Inside async task");
+    if let Some(runtime) = &model.gemma_runtime {
+        runtime.spawn(async move {
+            println!("Inside Gemma async task.");
 
-        match gemma_handle.generate_response(contents, client).await {
-            Ok(response) => {
-                println!("Received successful response of length {}", response.len());
+            match gemma_handle.generate_response(contents, client).await {
+                Ok(response) => {
+                    println!("Received successful response of length {}", response.len());
 
-                let gemma_msg = format!("Gemma: {}\n", response);
-                println!("{}", gemma_msg);
-                let _ = tx.send(Some(gemma_msg));
-            }
-            Err(e) => {
-                eprintln!("Gemma API error: {}", e);
-                if let Some(source) = e.source() {
-                    eprintln!("Error source: {}", source);
+                    let gemma_msg = format!("Gemma: {}\n", response);
+                    println!("{}", gemma_msg);
+                    let _ = tx.send(Some(gemma_msg));
+                }
+                Err(e) => {
+                    eprintln!("Gemma API error: {}", e);
+                    if let Some(source) = e.source() {
+                        eprintln!("Error source: {}", source);
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 }
 
 fn receive_gemmas(model: &mut Model) {
@@ -635,17 +680,19 @@ fn process_translations(model: &mut Model) {
                     let translation_type = model.translation_type.clone();
 
                     // Spawn async task to handle translation
-                    model.translation_runtime.spawn(async move {
-                        let translation = match translation_type {
-                            TranslationType::ToKorean => translate.to_korean(&msg).await,
-                            TranslationType::ToEnglish => translate.to_english(&msg).await,
-                            TranslationType::ToFrench => translate.to_french(&msg).await,
-                        };
-                        let _ = tx.send((key, translation));
-                    });
+                    if let Some(runtime) = &model.translation_runtime {
+                        runtime.spawn(async move {
+                            let translation = match translation_type {
+                                TranslationType::ToKorean => translate.to_korean(&msg).await,
+                                TranslationType::ToEnglish => translate.to_english(&msg).await,
+                                TranslationType::ToFrench => translate.to_french(&msg).await,
+                            };
+                            let _ = tx.send((key, translation));
+                        });
 
-                    // only start one new translation per frame
-                    break;
+                        // only start one new translation per frame
+                        break;
+                    }
                 }
             }
         }
@@ -771,10 +818,60 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
             model.verbose = !model.verbose;
             model.fps.start(app.time);
         }
-        Key::A => {
-            // cheap way to make clippy quiet
+        Key::Escape => {
+            shutdown(model);
+            app.quit();
         }
         _ => {}
+    }
+}
+
+// ************************ Graceful Shutdown  *************************************
+
+fn shutdown(model: &mut Model) {
+    println!("Shutting down application gracefully...");
+
+    // Signal WebSocket threads to terminate
+    model.ws_shutdown_flag.store(true, Ordering::SeqCst);
+
+    // Give WebSocket threads time to terminate
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    // Explicitly "leak" the runtimes
+    if model.translation_runtime.is_some() {
+        // Deliberately leak the runtime to prevent problematic drops
+        let leaked_runtime = Box::new(model.translation_runtime.take().unwrap());
+        std::mem::forget(leaked_runtime);
+    }
+
+    if model.gemma_runtime.is_some() {
+        // Deliberately leak the runtime to prevent problematic drops
+        let leaked_runtime = Box::new(model.gemma_runtime.take().unwrap());
+        std::mem::forget(leaked_runtime);
+    }
+
+    println!("WebSocket connections closed, application ready for shutdown");
+}
+
+impl Drop for Model {
+    fn drop(&mut self) {
+        println!("Model being dropped");
+
+        // Always set shutdown flag
+        if !self.ws_shutdown_flag.load(Ordering::SeqCst) {
+            self.ws_shutdown_flag.store(true, Ordering::SeqCst);
+        }
+
+        // Also leak any runtimes that might still be in the Model
+        if self.translation_runtime.is_some() {
+            let leaked_runtime = Box::new(self.translation_runtime.take().unwrap());
+            std::mem::forget(leaked_runtime);
+        }
+
+        if self.gemma_runtime.is_some() {
+            let leaked_runtime = Box::new(self.gemma_runtime.take().unwrap());
+            std::mem::forget(leaked_runtime);
+        }
     }
 }
 
