@@ -10,10 +10,10 @@ use std::{collections::BTreeMap, error::Error};
 #[derive(Clone)]
 pub struct GemmaInstance {
     pub id: String,
-    api_key: String,
-    model: String,
     pub client: Client,
     pub prompt: String,
+    api_key: String,
+    model: String,
 }
 
 #[derive(Clone)]

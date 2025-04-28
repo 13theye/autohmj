@@ -49,6 +49,7 @@ struct Model {
     gemma_2: GemmaInstance,
     gemma_2_tx: Sender<Option<String>>,
     gemma_2_rx: Receiver<Option<String>>,
+
     gemma_runtime: tokio::runtime::Runtime,
 
     main_font: Font,
@@ -281,9 +282,10 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     let dt = duration.as_secs_f32();
     model.fps.last_update = now;
 
-    // FPS calculations
+    // FPS update
     if model.verbose {
         model.fps.update(app.time, dt);
+        draw_fps(model);
     }
 
     // Handle the background
@@ -298,8 +300,10 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     process_translations(model);
 
     // Update & draw
-    draw_output(app, model);
+    draw_history(app, model);
+    draw_input(app, model);
 
+    // Send to rendering engine and post processing
     render_and_post(app, model);
 }
 
@@ -312,10 +316,124 @@ fn view(_app: &App, model: &Model, frame: Frame) {
         .encode_render_pass(frame.texture_view(), &mut encoder);
 }
 
-fn draw_output(app: &App, model: &Model) {
-    let num = model.connections.len() as f32;
+fn draw_history(app: &App, model: &Model) {
     let rect = app.main_window().rect();
+    let width = rect.w();
+    let height = rect.h();
+
+    // Define three columns
+    let column_width = width / 3.0;
+    let left_col = Rect::from_x_y_w_h(rect.left() + 100.0, 0.0, column_width, height);
+    let center_col = Rect::from_x_y_w_h(0.0, 0.0, column_width, height);
+    let right_col = Rect::from_x_y_w_h(
+        rect.right() - column_width - 100.0,
+        0.0,
+        column_width,
+        height,
+    );
+
+    // Find the most recent message from each speaker
+    let mut latest_gemma1 = None;
+    let mut latest_human = None;
+    let mut latest_gemma2 = None;
+
+    let gemma_1 = &model.gemma_1.id;
+    let gemma_2 = &model.gemma_2.id;
+
+    // Since BTreeMap is ordered by key, reverse iteration gives us the most recent messages first
+    for (_, item) in model.input_history.iter().rev() {
+        if item.author == *gemma_1 {
+            latest_gemma1 = Some(item);
+        } else if item.author == *gemma_2 {
+            latest_gemma2 = Some(item);
+        } else {
+            // Any author that is not one of the Gemma instances is considered a human
+            latest_human = Some(item);
+        }
+
+        // Stop once we've found one message from each speaker
+        if (latest_gemma1.is_some() && latest_human.is_some())
+            || latest_gemma2.is_some() && latest_human.is_some()
+        {
+            break;
+        }
+    }
+
+    // Position for message display (upper third of each column)
+    let message_y = rect.top() - 50.0;
+    let translation_y = rect.bottom() + 50.0;
+
+    // Draw the most recent message from Gemma 1
+    if let Some(item) = latest_gemma1 {
+        let message_text = item.msg.trim();
+        let translation_text = match &item.translation {
+            Some(translation) => format!("({})", translation.trim()),
+            None => String::new(),
+        };
+
+        draw_message(
+            &model.draw,
+            &model.text_layout,
+            &model.main_font,
+            message_text.to_owned(),
+            translation_text,
+            left_col.x(),
+            message_y,
+            translation_y,
+            column_width * 0.9, // width constraint
+        );
+    }
+
+    // Draw the most recent message from Gemma 2
+    if let Some(item) = latest_gemma2 {
+        let message_text = item.msg.trim();
+        let translation_text = match &item.translation {
+            Some(translation) => format!("({})", translation.trim()),
+            None => String::new(),
+        };
+
+        draw_message(
+            &model.draw,
+            &model.text_layout,
+            &model.main_font,
+            message_text.to_owned(),
+            translation_text,
+            right_col.x(),
+            message_y,
+            translation_y,
+            column_width * 0.9, // width constraint
+        );
+    }
+
+    // Draw human's current input OR history item if no input is in progress
+    if let Some(item) = latest_human {
+        let message_text = item.msg.trim();
+        let translation_text = match &item.translation {
+            Some(translation) => format!("({})", translation.trim()),
+            None => String::new(),
+        };
+
+        draw_message(
+            &model.draw,
+            &model.text_layout,
+            &model.main_font,
+            message_text.to_owned(),
+            translation_text,
+            center_col.x(),
+            message_y,
+            translation_y,
+            column_width * 0.9, // width constraint
+        );
+    }
+}
+
+fn draw_input(app: &App, model: &Model) {
+    // Draw the live input text
     for (i, (_id, text)) in model.connections.iter().enumerate() {
+        let num = model.connections.len() as f32;
+
+        let rect = app.main_window().rect();
+
         let x = rect.left() + rect.w() / (num + 1.0) * (i as f32 + 1.0);
         model
             .draw
@@ -323,13 +441,43 @@ fn draw_output(app: &App, model: &Model) {
             .layout(&model.text_layout)
             .width(1000.0)
             .font(model.main_font.clone())
-            .x_y(x, 0.0)
+            .x_y(x, -200.0)
             .color(rgba(0.71, 0.71, 1.0, 1.0))
             .font_size(50);
     }
-    // Handle FPS and origin display
-    if model.verbose {
-        draw_fps(model);
+}
+
+#[allow(clippy::too_many_arguments)]
+// Helper function to draw a message with text and translation
+fn draw_message(
+    draw: &Draw,
+    text_layout: &Layout,
+    font: &Font,
+    message: String,
+    translation: String,
+    x: f32,
+    y: f32,
+    translation_y: f32,
+    width: f32,
+) {
+    // Draw main message
+    draw.text(&message)
+        .layout(text_layout)
+        .width(width)
+        .font(font.clone())
+        .x_y(x, y + 10.0)
+        .color(rgba(0.71, 0.71, 1.0, 1.0))
+        .font_size(50);
+
+    // Draw translation if available
+    if !translation.is_empty() {
+        draw.text(&translation)
+            .layout(text_layout)
+            .width(width)
+            .font(font.clone())
+            .x_y(x, translation_y)
+            .color(rgba(0.4, 0.4, 0.4, 1.0))
+            .font_size(25);
     }
 }
 
@@ -393,7 +541,7 @@ fn receive_gemmas(model: &mut Model) {
     // check for Gemma responses
     while let Ok(response) = model.gemma_1_rx.try_recv() {
         if let Some(raw) = response {
-            let author = "Gemma 1";
+            let author = &model.gemma_1.id;
             if let Some((_, message)) = raw.split_once(": ") {
                 let history_item = HistoryItem::new(author, message);
                 add_history_item(model, history_item);
@@ -404,7 +552,7 @@ fn receive_gemmas(model: &mut Model) {
 
     while let Ok(response) = model.gemma_2_rx.try_recv() {
         if let Some(raw) = response {
-            let author = "Gemma 2";
+            let author = &model.gemma_2.id;
             if let Some((_, message)) = raw.split_once(": ") {
                 let history_item = HistoryItem::new(author, message);
                 add_history_item(model, history_item);
@@ -447,8 +595,10 @@ fn receive(model: &mut Model) {
             // If message ends with newline, it's a committed message
             if text.ends_with('\n') {
                 let entry = HistoryItem::new(id, text);
-                send_to_gemma(model, GemmaPersona::Gemma2, &entry.msg);
+                send_to_gemma(model, GemmaPersona::Gemma1, &entry.msg);
                 add_history_item(model, entry);
+                // Clear the buffer
+                //model.connections.remove(id);
                 history_updated = true;
             }
         }
@@ -464,6 +614,7 @@ fn receive(model: &mut Model) {
     }
 }
 
+// Remove oldest history entries if history is at capacity
 fn history_cleanup(model: &mut Model) {
     while model.input_history.len() > MAX_HISTORY {
         if let Some(smallest_key) = model.input_history.keys().next().copied() {
@@ -631,6 +782,12 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
 }
 
 enum GemmaPersona {
+    Gemma1,
+    Gemma2,
+}
+
+enum Players {
+    Human,
     Gemma1,
     Gemma2,
 }
