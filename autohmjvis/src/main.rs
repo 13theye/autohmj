@@ -23,6 +23,7 @@ use autohmjvis::{
 
 // Number of entries in input_history
 const MAX_HISTORY: usize = 100;
+const HUMAN_ID: &str = "Human";
 
 struct Model {
     background: BackgroundManager,
@@ -285,14 +286,14 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     // FPS update
     if model.verbose {
         model.fps.update(app.time, dt);
-        draw_fps(model);
+        draw_debug(app, model);
     }
 
     // Handle the background
     model.background.draw(&model.draw, app.time);
 
     // Receive incoming datagrams and update connections
-    receive(model);
+    receive_human(model);
     receive_gemmas(model);
     history_cleanup(model);
 
@@ -300,8 +301,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     process_translations(model);
 
     // Update & draw
-    draw_history(app, model);
-    draw_input(app, model);
+    draw_conversation(app, model);
 
     // Send to rendering engine and post processing
     render_and_post(app, model);
@@ -316,21 +316,17 @@ fn view(_app: &App, model: &Model, frame: Frame) {
         .encode_render_pass(frame.texture_view(), &mut encoder);
 }
 
-fn draw_history(app: &App, model: &Model) {
+fn draw_conversation(app: &App, model: &Model) {
     let rect = app.main_window().rect();
     let width = rect.w();
     let height = rect.h();
 
     // Define three columns
-    let column_width = width / 3.0;
-    let left_col = Rect::from_x_y_w_h(rect.left() + 100.0, 0.0, column_width, height);
+    let column_width = width / 2.0;
+    let left_col = Rect::from_x_y_w_h(rect.left() - column_width / 3.0, 0.0, column_width, height);
     let center_col = Rect::from_x_y_w_h(0.0, 0.0, column_width, height);
-    let right_col = Rect::from_x_y_w_h(
-        rect.right() - column_width - 100.0,
-        0.0,
-        column_width,
-        height,
-    );
+    let right_col =
+        Rect::from_x_y_w_h(rect.right() + column_width / 3.0, 0.0, column_width, height);
 
     // Find the most recent message from each speaker
     let mut latest_gemma1 = None;
@@ -361,7 +357,7 @@ fn draw_history(app: &App, model: &Model) {
 
     // Position for message display (upper third of each column)
     let message_y = rect.top() - 50.0;
-    let translation_y = rect.bottom() + 50.0;
+    let translation_y = rect.bottom();
 
     // Draw the most recent message from Gemma 1
     if let Some(item) = latest_gemma1 {
@@ -380,7 +376,7 @@ fn draw_history(app: &App, model: &Model) {
             left_col.x(),
             message_y,
             translation_y,
-            column_width * 0.9, // width constraint
+            column_width * 0.95, // width constraint
         );
     }
 
@@ -401,18 +397,34 @@ fn draw_history(app: &App, model: &Model) {
             right_col.x(),
             message_y,
             translation_y,
-            column_width * 0.9, // width constraint
+            column_width * 0.95, // width constraint
         );
     }
 
     // Draw human's current input OR history item if no input is in progress
-    if let Some(item) = latest_human {
-        let message_text = item.msg.trim();
-        let translation_text = match &item.translation {
-            Some(translation) => format!("({})", translation.trim()),
-            None => String::new(),
-        };
+    if model.connections.is_empty() {
+        if let Some(item) = latest_human {
+            let message_text = item.msg.trim();
+            let translation_text = match &item.translation {
+                Some(translation) => format!("({})", translation.trim()),
+                None => String::new(),
+            };
 
+            draw_message(
+                &model.draw,
+                &model.text_layout,
+                &model.main_font,
+                message_text.to_owned(),
+                translation_text,
+                center_col.x(),
+                message_y,
+                translation_y,
+                column_width * 0.95, // width constraint
+            );
+        }
+    } else if let Some(human_msg) = model.connections.get(HUMAN_ID) {
+        let message_text = human_msg.trim();
+        let translation_text = String::new();
         draw_message(
             &model.draw,
             &model.text_layout,
@@ -422,28 +434,8 @@ fn draw_history(app: &App, model: &Model) {
             center_col.x(),
             message_y,
             translation_y,
-            column_width * 0.9, // width constraint
+            column_width * 0.95, // width constraint
         );
-    }
-}
-
-fn draw_input(app: &App, model: &Model) {
-    // Draw the live input text
-    for (i, (_id, text)) in model.connections.iter().enumerate() {
-        let num = model.connections.len() as f32;
-
-        let rect = app.main_window().rect();
-
-        let x = rect.left() + rect.w() / (num + 1.0) * (i as f32 + 1.0);
-        model
-            .draw
-            .text(text)
-            .layout(&model.text_layout)
-            .width(1000.0)
-            .font(model.main_font.clone())
-            .x_y(x, -200.0)
-            .color(rgba(0.71, 0.71, 1.0, 1.0))
-            .font_size(50);
     }
 }
 
@@ -465,7 +457,7 @@ fn draw_message(
         .layout(text_layout)
         .width(width)
         .font(font.clone())
-        .x_y(x, y + 10.0)
+        .x_y(x, y)
         .color(rgba(0.71, 0.71, 1.0, 1.0))
         .font_size(50);
 
@@ -476,8 +468,8 @@ fn draw_message(
             .width(width)
             .font(font.clone())
             .x_y(x, translation_y)
-            .color(rgba(0.4, 0.4, 0.4, 1.0))
-            .font_size(25);
+            .color(rgba(0.7, 0.7, 0.4, 1.0))
+            .font_size(30);
     }
 }
 
@@ -564,7 +556,7 @@ fn receive_gemmas(model: &mut Model) {
 
 // ************************ Networking *************************************************
 
-fn receive(model: &mut Model) {
+fn receive_human(model: &mut Model) {
     // Pick up any brand-new client writers
     while let Ok(writer) = model.ws_writer_rx.try_recv() {
         println!("Registered new client. Broadcasting history.");
@@ -598,7 +590,7 @@ fn receive(model: &mut Model) {
                 send_to_gemma(model, GemmaPersona::Gemma1, &entry.msg);
                 add_history_item(model, entry);
                 // Clear the buffer
-                //model.connections.remove(id);
+                model.connections.remove(id);
                 history_updated = true;
             }
         }
@@ -738,8 +730,10 @@ impl Fps {
     }
 }
 
-fn draw_fps(model: &Model) {
+fn draw_debug(app: &App, model: &Model) {
     let draw = &model.draw;
+    let rect = app.main_window().inner_size_points();
+
     // Draw (+,+) axes
     draw.line()
         .points(pt2(0.0, 0.0), pt2(50.0, 0.0))
@@ -751,10 +745,13 @@ fn draw_fps(model: &Model) {
         .stroke_weight(1.0);
 
     // Visualize FPS (Optional)
-    draw.text(&format!("FPS: {:.1}", model.fps.fps))
-        .x_y(900.0, 520.0)
-        .color(RED)
-        .font_size(20);
+    draw.text(&format!(
+        "FPS: {:.1}\nTranslation: {:?}",
+        model.fps.fps, model.translation_type
+    ))
+    .x_y(rect.0 - 150.0, rect.1 - 30.0)
+    .color(RED)
+    .font_size(20);
 }
 
 // ************************ Main window input  *************************************

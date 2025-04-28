@@ -5,7 +5,7 @@
 //
 use deeplx::{Config, DeepLX};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum TranslationType {
     ToEnglish,
     ToFrench,

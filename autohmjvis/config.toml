@@ -3,8 +3,8 @@
 port = 50001
 
 [rendering_main]
-texture_width = 3800
-texture_height = 1080
+texture_width = 3840
+texture_height = 1440
 
 # Please don't change these
 texture_samples = 1
@@ -13,8 +13,8 @@ arc_resolution = 25
 [main_window]
 # The size of the monitoring window.
 # Currently scaling to 1/2 of texture resolution
-width = 1900
-height = 540
+width = 1920
+height = 720
 
 [osc]
 # OSC listening port. UDP only.
