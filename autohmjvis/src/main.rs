@@ -16,6 +16,7 @@ use std::{
     },
     time::Instant,
 };
+use tokio::sync::broadcast;
 use tungstenite::{accept, Message};
 
 use autohmjcommon::{History, HistoryItem};
@@ -57,7 +58,8 @@ struct Model {
 
     gemma_runtime: Option<tokio::runtime::Runtime>,
 
-    main_font: Font,
+    korean_font: Font,
+    latin_font: Font,
 
     // WebSockets
     ws_rx: Receiver<String>,
@@ -81,6 +83,7 @@ struct Model {
 
     // graceful shutdown
     ws_shutdown_flag: Arc<AtomicBool>,
+    shutdown_tx: broadcast::Sender<()>,
 }
 
 fn model(app: &App) -> Model {
@@ -186,7 +189,17 @@ fn model(app: &App) -> Model {
     let font_path = assets.join("gulim.ttf");
     let font_bytes = fs::read(&font_path)
         .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
-    let main_font = Font::from_bytes(font_bytes)
+    let korean_font = Font::from_bytes(font_bytes)
+        .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
+
+    // --- Load Font for Nannou Draw ---
+    // Assumes "assets/gulim.ttf" exists relative to the executable
+    // or relative to the project root if running with `cargo run`
+
+    let font_path = assets.join("avenir4.ttf");
+    let font_bytes = fs::read(&font_path)
+        .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
+    let latin_font = Font::from_bytes(font_bytes)
         .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
 
     // Create main output window
@@ -256,6 +269,9 @@ fn model(app: &App) -> Model {
         .left_justify()
         .build();
 
+    // Set up shutdown channel
+    let (shutdown_tx, _) = broadcast::channel(1);
+
     // Set up translation runtime
     let translation_runtime =
         tokio::runtime::Runtime::new().expect("Failed to create Tokio translation runtime");
@@ -294,7 +310,8 @@ fn model(app: &App) -> Model {
         gemma_2_rx,
         gemma_runtime: Some(gemma_runtime),
 
-        main_font,
+        korean_font,
+        latin_font,
 
         draw,
         draw_renderer,
@@ -313,6 +330,7 @@ fn model(app: &App) -> Model {
         verbose: false,
 
         ws_shutdown_flag,
+        shutdown_tx,
     }
 }
 
@@ -413,9 +431,11 @@ fn draw_conversation(app: &App, model: &Model) {
         draw_message(
             &model.draw,
             &model.text_layout,
-            &model.main_font,
+            &model.korean_font,
+            &model.latin_font,
             message_text.to_owned(),
             translation_text,
+            &model.translation_type,
             left_col.x(),
             message_y,
             translation_y,
@@ -434,9 +454,11 @@ fn draw_conversation(app: &App, model: &Model) {
         draw_message(
             &model.draw,
             &model.text_layout,
-            &model.main_font,
+            &model.korean_font,
+            &model.latin_font,
             message_text.to_owned(),
             translation_text,
+            &model.translation_type,
             right_col.x(),
             message_y,
             translation_y,
@@ -456,9 +478,11 @@ fn draw_conversation(app: &App, model: &Model) {
             draw_message(
                 &model.draw,
                 &model.text_layout,
-                &model.main_font,
+                &model.korean_font,
+                &model.latin_font,
                 message_text.to_owned(),
                 translation_text,
+                &model.translation_type,
                 center_col.x(),
                 message_y,
                 translation_y,
@@ -471,9 +495,11 @@ fn draw_conversation(app: &App, model: &Model) {
         draw_message(
             &model.draw,
             &model.text_layout,
-            &model.main_font,
+            &model.korean_font,
+            &model.latin_font,
             message_text.to_owned(),
             translation_text,
+            &model.translation_type,
             center_col.x(),
             message_y,
             translation_y,
@@ -488,8 +514,10 @@ fn draw_message(
     draw: &Draw,
     text_layout: &Layout,
     font: &Font,
+    alt_font: &Font,
     message: String,
     translation: String,
+    translation_type: &TranslationType,
     x: f32,
     y: f32,
     translation_y: f32,
@@ -506,13 +534,19 @@ fn draw_message(
 
     // Draw translation if available
     if !translation.is_empty() {
+        let translation_font = if translation_type == &TranslationType::ToKorean {
+            font
+        } else {
+            alt_font
+        };
+
         draw.text(&translation)
             .layout(text_layout)
             .width(width)
-            .font(font.clone())
+            .font(translation_font.clone())
             .x_y(x, translation_y)
             .color(rgba(0.7, 0.7, 0.4, 1.0))
-            .font_size(30);
+            .font_size(40);
     }
 }
 
@@ -551,23 +585,43 @@ fn send_to_gemma(model: &mut Model, persona: GemmaPersona, message: &str) {
         GemmaPersona::Gemma2 => model.gemma_2_tx.clone(),
     };
 
+    // Shutdown message receiver
+    let mut shutdown_rx = model.shutdown_tx.subscribe();
+
     if let Some(runtime) = &model.gemma_runtime {
         runtime.spawn(async move {
             println!("Inside Gemma async task.");
 
-            match gemma_handle.generate_response(contents, client).await {
-                Ok(response) => {
-                    println!("Received successful response of length {}", response.len());
+            // Create a future that completes on shutdown signal
+            let shutdown = async {
+                let _ = shutdown_rx.recv().await;
+            };
 
-                    let gemma_msg = format!("Gemma: {}\n", response);
-                    println!("{}", gemma_msg);
-                    let _ = tx.send(Some(gemma_msg));
-                }
-                Err(e) => {
-                    eprintln!("Gemma API error: {}", e);
-                    if let Some(source) = e.source() {
-                        eprintln!("Error source: {}", source);
+            let task = async {
+                match gemma_handle.generate_response(contents, client).await {
+                    Ok(response) => {
+                        println!("Received successful response of length {}", response.len());
+
+                        let gemma_msg = format!("Gemma: {}\n", response);
+                        println!("{}", gemma_msg);
+                        let _ = tx.send(Some(gemma_msg));
                     }
+                    Err(e) => {
+                        eprintln!("Gemma API error: {}", e);
+                        if let Some(source) = e.source() {
+                            eprintln!("Error source: {}", source);
+                        }
+                    }
+                }
+            };
+
+            // Race between the shutdown signal and the task
+            tokio::select! {
+                _ = shutdown => {
+                    println!("Gemma task received shutdown signal");
+                }
+                _ = task => {
+                    println!("Gemma task completed normally");
                 }
             }
         });
@@ -673,6 +727,9 @@ fn process_translations(model: &mut Model) {
         if let Some(key) = model.pending_translations.pop() {
             if let Some(item) = model.input_history.get(&key).cloned() {
                 if item.translation.is_none() && !item.msg.trim().is_empty() {
+                    // Set up shutdown signal listener
+                    let mut shutdown_rx = model.shutdown_tx.subscribe();
+                    // Set up translation pipeline
                     let translate = model.translate.clone();
                     let msg = item.msg.clone();
                     let tx = model.translation_tx.clone();
@@ -682,12 +739,28 @@ fn process_translations(model: &mut Model) {
                     // Spawn async task to handle translation
                     if let Some(runtime) = &model.translation_runtime {
                         runtime.spawn(async move {
-                            let translation = match translation_type {
-                                TranslationType::ToKorean => translate.to_korean(&msg).await,
-                                TranslationType::ToEnglish => translate.to_english(&msg).await,
-                                TranslationType::ToFrench => translate.to_french(&msg).await,
+                            // Spawn a shutdown future
+                            let shutdown = async {
+                                let _ = shutdown_rx.recv().await;
                             };
-                            let _ = tx.send((key, translation));
+
+                            let task = async {
+                                let translation = match translation_type {
+                                    TranslationType::ToKorean => translate.to_korean(&msg).await,
+                                    TranslationType::ToEnglish => translate.to_english(&msg).await,
+                                    TranslationType::ToFrench => translate.to_french(&msg).await,
+                                };
+                                let _ = tx.send((key, translation));
+                            };
+
+                            tokio::select! {
+                                _ = shutdown => {
+                                    println!("Translation task received shutdown signal");
+                                }
+                                _ = task => {
+                                    println!("Translation task completed normally")
+                                }
+                            }
                         });
 
                         // only start one new translation per frame
@@ -829,48 +902,62 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
 // ************************ Graceful Shutdown  *************************************
 
 fn shutdown(model: &mut Model) {
-    println!("Shutting down application gracefully...");
+    println!("Initiating graceful shutdown...");
 
-    // Signal WebSocket threads to terminate
+    // 1. Signal WebSocket threads to terminate
     model.ws_shutdown_flag.store(true, Ordering::SeqCst);
 
-    // Give WebSocket threads time to terminate
+    // 2. Signal all Tokio tasks to terminate
+    println!("Sending shutdown signal to async tasks...");
+    let _ = model.shutdown_tx.send(());
+
+    // 3. Give WebSocket threads and async tasks time to terminate
+    println!("Waiting for connections to close...");
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    // Explicitly "leak" the runtimes
-    if model.translation_runtime.is_some() {
-        // Deliberately leak the runtime to prevent problematic drops
-        let leaked_runtime = Box::new(model.translation_runtime.take().unwrap());
-        std::mem::forget(leaked_runtime);
+    // 4. Take ownership of runtimes
+    let translation_runtime = model.translation_runtime.take();
+    let gemma_runtime = model.gemma_runtime.take();
+
+    // 5. Spawn a dedicated thread to shut them down safely
+    if translation_runtime.is_some() || gemma_runtime.is_some() {
+        std::thread::spawn(move || {
+            if let Some(runtime) = translation_runtime {
+                println!("Shutting down translation runtime in separate thread...");
+                runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+            }
+
+            if let Some(runtime) = gemma_runtime {
+                println!("Shutting down Gemma runtime in separate thread...");
+                runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+            }
+
+            println!("Tokio runtimes shutdown complete");
+        })
+        .join()
+        .ok(); // Wait for the thread to complete
     }
 
-    if model.gemma_runtime.is_some() {
-        // Deliberately leak the runtime to prevent problematic drops
-        let leaked_runtime = Box::new(model.gemma_runtime.take().unwrap());
-        std::mem::forget(leaked_runtime);
-    }
-
-    println!("WebSocket connections closed, application ready for shutdown");
+    println!("Graceful shutdown complete");
 }
 
 impl Drop for Model {
     fn drop(&mut self) {
         println!("Model being dropped");
 
-        // Always set shutdown flag
+        // Same as in shutdown - signal tasks to terminate
+        let _ = self.shutdown_tx.send(());
+
+        // Wait briefly
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Take the runtimes out to avoid issues
+        let _ = self.translation_runtime.take();
+        let _ = self.gemma_runtime.take();
+
+        // Set WebSocket shutdown flag if not already set
         if !self.ws_shutdown_flag.load(Ordering::SeqCst) {
             self.ws_shutdown_flag.store(true, Ordering::SeqCst);
-        }
-
-        // Also leak any runtimes that might still be in the Model
-        if self.translation_runtime.is_some() {
-            let leaked_runtime = Box::new(self.translation_runtime.take().unwrap());
-            std::mem::forget(leaked_runtime);
-        }
-
-        if self.gemma_runtime.is_some() {
-            let leaked_runtime = Box::new(self.gemma_runtime.take().unwrap());
-            std::mem::forget(leaked_runtime);
         }
     }
 }

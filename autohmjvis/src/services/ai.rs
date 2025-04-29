@@ -203,13 +203,7 @@ impl GemmaHandle {
         let response_text = http_response.text().await?;
         println!("Raw response: {}", response_text);
 
-        let response = client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?
-            .json::<GemmaResponse>()
-            .await?;
+        let response: GemmaResponse = serde_json::from_str(&response_text)?;
 
         // Extract text from the first candidate's content
         println!("Gemma raw response: {:?}", response);
