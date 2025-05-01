@@ -22,6 +22,7 @@ use tungstenite::{accept, Message};
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig},
     models::{HistoryItem, HistoryManager},
+    server::HMJServer,
     services::{ai, GemmaInstance, TranslationType},
     views::BackgroundManager,
 };
@@ -49,9 +50,7 @@ struct Model {
     latin_font: Font,
 
     // WebSockets
-    ws_rx: Receiver<String>,
-    ws_writer_rx: Receiver<Sender<String>>, // new writers from accept thread
-    ws_writers: Vec<Sender<String>>,        // one per connection
+    server: HMJServer,
     connections: HashMap<String, String>,
 
     // Nannou API
@@ -81,88 +80,13 @@ fn model(app: &App) -> Model {
     let gemma_config = GemmaConfig::load(&config.paths.gemma)
         .expect("\nAuto훈민정음: FAILED TO LOAD GEMMA.TOML\n");
 
-    // Set up WebSocket
-    let (ws_tx, ws_rx) = channel::<String>();
-    let (writer_tx, ws_writer_rx) = channel::<Sender<String>>();
-    let listen_addr = format!("0.0.0.0:{}", config.server.port);
+    // Initialize HMJServer
+    let mut server = HMJServer::new(config.server.port);
+    server.start().expect("Failed to start HMJServer");
 
     // Set up Shutdown Flag
     let ws_shutdown_flag = Arc::new(AtomicBool::new(false));
     let ws_shutdown_flag_clone = ws_shutdown_flag.clone();
-
-    std::thread::spawn(move || {
-        let listener = TcpListener::bind(&listen_addr).expect("Failed to bind WebSocket listener");
-
-        // Make listener non-blocking so we can check shutdown flag
-        listener
-            .set_nonblocking(true)
-            .expect("Failed to set non-blocking mode");
-
-        while !ws_shutdown_flag_clone.load(Ordering::SeqCst) {
-            match listener.accept() {
-                Ok((stream, _)) => {
-                    match accept(stream) {
-                        Ok(mut ws) => {
-                            // create a channel for this client's outbound messages
-                            let (out_tx, out_rx) = channel::<String>();
-
-                            // tell main thread that there's a new client that can be written to
-                            writer_tx.send(out_tx.clone()).unwrap();
-
-                            let in_tx = ws_tx.clone();
-
-                            // set nonblocking so read_message() returns WouldBlock
-                            ws.get_mut().set_nonblocking(true).unwrap();
-
-                            // Create a clone of the shutdown flag for this client thread
-                            let client_shutdown_flag = ws_shutdown_flag_clone.clone();
-
-                            // Spawn client handler thread
-                            std::thread::spawn(move || {
-                                while !client_shutdown_flag.load(Ordering::SeqCst) {
-                                    // 1. Read commits
-                                    match ws.read() {
-                                        Ok(Message::Text(utf8)) => {
-                                            let line = utf8.to_string();
-                                            let _ = in_tx.send(line);
-                                        }
-                                        Err(tungstenite::Error::Io(ref e))
-                                            if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                                        Err(_) => break, // connection closed or error
-                                        _ => {}
-                                    }
-
-                                    // 2. Drain outbound history messages
-                                    while let Ok(msg) = out_rx.try_recv() {
-                                        let _ = ws.send(Message::Text(msg.into()));
-                                    }
-
-                                    // avoid busy-spin
-                                    std::thread::sleep(std::time::Duration::from_millis(3));
-                                }
-
-                                println!("WebSocket client handler shutting down")
-                            });
-                        }
-                        Err(e) => eprintln!("WebSocket handshake failed: {}", e),
-                    }
-                }
-
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    // No connection available, this is normal with non-blocking sockets
-                    // Sleep briefly to avoid tight loop
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-
-                Err(e) => {
-                    // Real error
-                    eprintln!("Error accepting connection: {}", e);
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                }
-            }
-        }
-        println!("WebSocket listener shutting down");
-    });
 
     // Set up translation send/receive
     let (gemma_1_tx, gemma_1_rx) = channel::<Option<String>>();
@@ -294,9 +218,7 @@ fn model(app: &App) -> Model {
         texture_main,
         texture_reshaper_main,
 
-        ws_rx,
-        ws_writer_rx,
-        ws_writers: Vec::new(),
+        server,
         connections: HashMap::new(),
 
         post_processing,
@@ -337,7 +259,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 
     if model.history.needs_broadcast {
         model.history.needs_broadcast = false;
-        broadcast_history(model, None);
+        model.server.broadcast(model.history.serialize());
     }
 
     // Update & draw
@@ -548,6 +470,24 @@ fn render_and_post(app: &App, model: &mut Model) {
     );
 }
 
+fn receive_human(model: &mut Model) {
+    // Receive WebSocket messages
+    while let Some((id, text)) = model.server.try_recv() {
+        // Update connections map for live display or finalize messages
+        if text.ends_with('\n') {
+            // Committed message
+            let entry = HistoryItem::new(&id, &text);
+            send_to_gemma(model, GemmaPersona::Gemma1, &entry.msg);
+            model.history.add(entry);
+            // Clear the buffer
+            model.connections.remove(&id);
+        } else {
+            // In-progress message
+            model.connections.insert(id, text);
+        }
+    }
+}
+
 // ************************ AI API *************************************************
 fn send_to_gemma(model: &mut Model, persona: GemmaPersona, message: &str) {
     let gemma = match persona {
@@ -626,59 +566,6 @@ fn receive_gemmas(model: &mut Model) {
                 let history_item = HistoryItem::new(author, message);
                 model.history.add(history_item);
             }
-        }
-    }
-}
-
-// ************************ Networking *************************************************
-
-fn receive_human(model: &mut Model) {
-    // Pick up any brand-new client writers
-    while let Ok(writer) = model.ws_writer_rx.try_recv() {
-        println!("Registered new client. Broadcasting history.");
-        broadcast_history(model, Some(&writer));
-        model.ws_writers.push(writer);
-    }
-
-    // Drain everything that arrived since last frame
-    while let Ok(raw) = model.ws_rx.try_recv() {
-        if let Some((command, payload)) = raw.split_once('|') {
-            if command == "register" {
-                model.connections.insert(payload.to_string(), String::new());
-                continue;
-            }
-        }
-
-        if let Some((id, text)) = raw.split_once(':') {
-            // Update the connections map for live display
-            if !text.is_empty() {
-                model.connections.insert(id.to_string(), text.to_string());
-            } else {
-                // Remove empty text entries
-                model.connections.remove(id);
-            }
-
-            // If message ends with newline, it's a committed message
-            if text.ends_with('\n') {
-                let entry = HistoryItem::new(id, text);
-                send_to_gemma(model, GemmaPersona::Gemma1, &entry.msg);
-                model.history.add(entry);
-                // Clear the buffer
-                model.connections.remove(id);
-            }
-        }
-    }
-}
-
-fn broadcast_history(model: &Model, specific_target: Option<&Sender<String>>) {
-    let dump = model.history.serialize();
-    if let Some(w) = specific_target {
-        // send to specific
-        let _ = w.send(dump.clone());
-    } else {
-        // send to all
-        for w in &model.ws_writers {
-            let _ = w.send(dump.clone());
         }
     }
 }
@@ -791,7 +678,7 @@ fn shutdown(model: &mut Model) {
     println!("Initiating graceful shutdown...");
 
     // 1. Signal WebSocket threads to terminate
-    model.ws_shutdown_flag.store(true, Ordering::SeqCst);
+    model.server.shutdown();
 
     // 2. Signal all Tokio tasks to terminate
     println!("Sending shutdown signal to async tasks...");
@@ -842,11 +729,7 @@ impl Drop for Model {
         // todo: use history method to handle this
         let _ = self.history.translation_runtime.take();
         let _ = self.gemma_runtime.take();
-
-        // Set WebSocket shutdown flag if not already set
-        if !self.ws_shutdown_flag.load(Ordering::SeqCst) {
-            self.ws_shutdown_flag.store(true, Ordering::SeqCst);
-        }
+        let _ = self.server.runtime.take();
     }
 }
 

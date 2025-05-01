@@ -25,7 +25,7 @@ pub struct HMJServer {
     clients: Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>,
 
     // Tokio runtime
-    runtime: Option<tokio::runtime::Runtime>,
+    pub runtime: Option<tokio::runtime::Runtime>,
 
     // Shutdown channel
     shutdown_tx: broadcast::Sender<()>,
@@ -132,9 +132,15 @@ impl HMJServer {
         // Signal all tasks to terminate
         let _ = self.shutdown_tx.send(());
 
-        // Take runtime and shut it down
-        if let Some(runtime) = self.runtime.take() {
-            runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+        // Shut down server runtime from a separate thread
+        let server_runtime = self.runtime.take();
+        if server_runtime.is_some() {
+            std::thread::spawn(move || {
+                if let Some(runtime) = server_runtime {
+                    println!("Shutting down HMJServer runtime in separate thread...");
+                    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+                }
+            });
         }
 
         println!("HMJServer shutdown complete");
@@ -153,8 +159,6 @@ async fn handle_connection(
     let ws_stream: WebSocketStream<TcpStream> = accept_async(stream)
         .await
         .expect("Error receiving WebSocket stream");
-
-    // Explicitly use the correct import
 
     // Split the WebSocket stream with explicit types
     let (mut ws_sender, mut ws_receiver) = StreamExt::split(ws_stream);
@@ -175,16 +179,18 @@ async fn handle_connection(
 
     // Task to send messages to the WebSocket (handles both direct and broadcast messages)
     let sender_handle = {
-        let client_id = client_id.clone();
+        let _client_id = client_id.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
+                    // Send a direct message
                     Some(msg) = client_rx.recv() => {
                         if let Err(e) = ws_sender.send(msg).await {
                             eprintln!("Error sending direct message: {}", e);
                             break;
                         }
                     }
+                    // Relay messages received via broadcast task bus, and send through WebSocket
                     result = broadcast_rx.recv() => {
                         match result {
                             Ok(msg) => {
@@ -193,7 +199,10 @@ async fn handle_connection(
                                     break;
                                 }
                             }
-                            Err(_) => break, // Broadcast channel error
+                            Err(e) => {
+                                eprintln!("Broadcast channel error: {}", e);
+                                break; // Broadcast channel error
+                            }
                         }
                     }
                     _ = sender_shutdown_rx.recv() => {
@@ -219,21 +228,23 @@ async fn handle_connection(
                             Some(Ok(msg)) => {
                                 if let Message::Text(text) = msg {
                                     // Handle registration message
-                                    if text.starts_with("register|") {
-                                        let id = text.trim_start_matches("register|").to_string();
+                                    if let Some((command, payload)) = text.split_once('|') {
+                                        if command == ("register") {
+                                            let id = payload.to_owned();
 
-                                        // Store client ID
-                                        {
-                                            let mut client_id_lock = client_id.lock().await;
-                                            *client_id_lock = id.clone();
+                                            // Store client ID
+                                            {
+                                                let mut client_id_lock = client_id.lock().await;
+                                                *client_id_lock = id.clone();
+                                            }
+
+                                            // Add client to map
+                                            let mut clients_lock = clients.lock().await;
+                                            clients_lock.insert(id.clone(), client_tx.clone());
+
+                                            println!("Client registered: {} from {}", id, addr);
+                                            continue;
                                         }
-
-                                        // Add client to map
-                                        let mut clients_lock = clients.lock().await;
-                                        clients_lock.insert(id.clone(), client_tx.clone());
-
-                                        println!("Client registered: {} from {}", id, addr);
-                                        continue;
                                     }
 
                                     // Handle regular message
@@ -294,6 +305,6 @@ async fn handle_connection(
 
 impl Drop for HMJServer {
     fn drop(&mut self) {
-        self.shutdown();
+        println!("HMJServer being dropped");
     }
 }
