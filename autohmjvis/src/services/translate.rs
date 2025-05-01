@@ -1,6 +1,6 @@
 // src/services/translate.rs
 //
-// uses the external DeepLX crate to access DeepLX translation
+// A Translation service that uses the external DeepLX crate to access DeepLX translation
 //
 //
 use deeplx::{Config, DeepLX};

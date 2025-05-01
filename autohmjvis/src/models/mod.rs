@@ -1,2 +1,2 @@
 pub mod history;
-pub use history::HistoryManager;
+pub use history::{History, HistoryItem, HistoryManager};

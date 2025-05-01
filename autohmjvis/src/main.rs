@@ -6,7 +6,7 @@
 use nannou::{prelude::*, text::*};
 use nnpipe::*;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     fs,
     net::TcpListener,
     sync::{
@@ -19,16 +19,13 @@ use std::{
 use tokio::sync::broadcast;
 use tungstenite::{accept, Message};
 
-use autohmjcommon::{History, HistoryItem};
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig},
-    models::HistoryManager,
-    services::{ai, GemmaInstance, Translate, TranslationType},
+    models::{HistoryItem, HistoryManager},
+    services::{ai, GemmaInstance, TranslationType},
     views::BackgroundManager,
 };
 
-// Number of entries in input_history
-const MAX_HISTORY: usize = 100;
 const HUMAN_ID: &str = "Human";
 
 struct Model {
@@ -339,8 +336,8 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     model.history.update();
 
     if model.history.needs_broadcast {
-        broadcast_history(model, None);
         model.history.needs_broadcast = false;
+        broadcast_history(model, None);
     }
 
     // Update & draw

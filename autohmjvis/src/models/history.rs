@@ -1,18 +1,19 @@
 // src/models/history.rs
 //
-// Handles input history and translations
-
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
-use tokio::sync;
+// Input history and translations
 
 use crate::services::{ai, GemmaInstance, Translate, TranslationType};
-use autohmjcommon::{History, HistoryItem};
+use std::{collections::BTreeMap, sync::Arc};
+use tokio::sync::{broadcast, mpsc};
+// Re-export History Types
+pub use autohmjcommon::{History, HistoryItem};
 
+// Maximum number of entries in the history
 const MAX_HISTORY: usize = 100;
 
+// The HistoryManager maintains the input history between client and AIs.
+// Each HistoryItem contains the input from the client and its translation.
+// HistoryManager fires off tasks to fetch translations for each entry once received.
 pub struct HistoryManager {
     pub entries: BTreeMap<usize, HistoryItem>,
     pub next_history_idx: usize,
@@ -22,20 +23,20 @@ pub struct HistoryManager {
     translation_queue: Vec<usize>, // Keys of items awaiting translation
     pub translation_type: TranslationType,
 
-    // Async handling
+    // Asynchronous translation
     pub translation_runtime: Option<tokio::runtime::Runtime>,
-    shutdown_rx: sync::broadcast::Receiver<()>,
-    translation_tx: sync::mpsc::Sender<(usize, Option<String>)>,
-    translation_rx: sync::mpsc::Receiver<(usize, Option<String>)>,
+    translation_tx: mpsc::Sender<(usize, Option<String>)>,
+    translation_rx: mpsc::Receiver<(usize, Option<String>)>,
+    shutdown_rx: broadcast::Receiver<()>, // Listener for shutdown signal
 
-    // Flag that a change requires broadcast
+    // Flag that the history has been updated and needs to be broadcast to clients
     pub needs_broadcast: bool,
 }
 
 impl HistoryManager {
-    pub fn new(shutdown: &sync::broadcast::Sender<()>) -> Self {
+    pub fn new(shutdown: &broadcast::Sender<()>) -> Self {
         // Set up translation send/receive
-        let (translation_tx, translation_rx) = sync::mpsc::channel::<(usize, Option<String>)>(16);
+        let (translation_tx, translation_rx) = mpsc::channel::<(usize, Option<String>)>(16);
 
         // Set up tokio translation runtime
         let translation_runtime =
@@ -99,7 +100,7 @@ impl HistoryManager {
     // Checks that a translation queue item is valid and sends it off to translation API
     // Receives any completed translations
     fn process_translation_queue(&mut self) {
-        if !self.translation_queue.is_empty() {
+        while !self.translation_queue.is_empty() {
             if let Some(key) = self.translation_queue.pop() {
                 if let Some(item) = self.entries.get(&key) {
                     if item.translation.is_none() && !item.msg.trim().is_empty() {

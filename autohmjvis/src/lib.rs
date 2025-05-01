@@ -2,5 +2,6 @@
 pub mod config;
 pub mod effects;
 pub mod models;
+pub mod server;
 pub mod services;
 pub mod views;
