@@ -22,6 +22,7 @@ use tungstenite::{accept, Message};
 use autohmjcommon::{History, HistoryItem};
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig},
+    models::HistoryManager,
     services::{ai, GemmaInstance, Translate, TranslationType},
     views::BackgroundManager,
 };
@@ -34,19 +35,8 @@ struct Model {
     background: BackgroundManager,
     text_layout: Layout,
 
-    // Input history tracking
-    input_history: BTreeMap<usize, HistoryItem>,
-    next_history_idx: usize,
-
-    // Translation
-    translate: Translate,
-    pending_translations: Vec<usize>, // Keys of items awaiting translation
-    translation_runtime: Option<tokio::runtime::Runtime>,
-
-    // Async sender/receivers
-    translation_tx: Sender<(usize, Option<String>)>,
-    translation_rx: Receiver<(usize, Option<String>)>,
-    translation_type: TranslationType,
+    // History and Translation
+    history: HistoryManager,
 
     // AI
     gemma_1: GemmaInstance,
@@ -178,7 +168,6 @@ fn model(app: &App) -> Model {
     });
 
     // Set up translation send/receive
-    let (translation_tx, translation_rx) = channel::<(usize, Option<String>)>();
     let (gemma_1_tx, gemma_1_rx) = channel::<Option<String>>();
     let (gemma_2_tx, gemma_2_rx) = channel::<Option<String>>();
 
@@ -272,9 +261,8 @@ fn model(app: &App) -> Model {
     // Set up shutdown channel
     let (shutdown_tx, _) = broadcast::channel(1);
 
-    // Set up translation runtime
-    let translation_runtime =
-        tokio::runtime::Runtime::new().expect("Failed to create Tokio translation runtime");
+    // Set up history manager
+    let history = HistoryManager::new(&shutdown_tx);
 
     // Set up Gemma runtime
     let gemma_runtime = tokio::runtime::Runtime::new().expect("Failed to create Gemma runtime");
@@ -283,16 +271,7 @@ fn model(app: &App) -> Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         text_layout,
 
-        input_history: BTreeMap::new(),
-        next_history_idx: 0,
-
-        translate: Translate::default(),
-        pending_translations: Vec::new(),
-        translation_runtime: Some(translation_runtime),
-        translation_type: TranslationType::ToKorean,
-
-        translation_tx,
-        translation_rx,
+        history,
 
         gemma_1: GemmaInstance::new(
             gemma_config.persona_1.id,
@@ -356,10 +335,13 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     // Receive incoming datagrams and update connections
     receive_human(model);
     receive_gemmas(model);
-    history_cleanup(model);
 
-    // Initiate translations for any untranslated message in history
-    process_translations(model);
+    model.history.update();
+
+    if model.history.needs_broadcast {
+        broadcast_history(model, None);
+        model.history.needs_broadcast = false;
+    }
 
     // Update & draw
     draw_conversation(app, model);
@@ -398,7 +380,7 @@ fn draw_conversation(app: &App, model: &Model) {
     let gemma_2 = &model.gemma_2.id;
 
     // Since BTreeMap is ordered by key, reverse iteration gives us the most recent messages first
-    for (_, item) in model.input_history.iter().rev() {
+    for (_, item) in model.history.entries.iter().rev() {
         if item.author == *gemma_1 {
             latest_gemma1 = Some(item);
         } else if item.author == *gemma_2 {
@@ -435,7 +417,7 @@ fn draw_conversation(app: &App, model: &Model) {
             &model.latin_font,
             message_text.to_owned(),
             translation_text,
-            &model.translation_type,
+            &model.history.translation_type,
             left_col.x(),
             message_y,
             translation_y,
@@ -458,7 +440,7 @@ fn draw_conversation(app: &App, model: &Model) {
             &model.latin_font,
             message_text.to_owned(),
             translation_text,
-            &model.translation_type,
+            &model.history.translation_type,
             right_col.x(),
             message_y,
             translation_y,
@@ -482,7 +464,7 @@ fn draw_conversation(app: &App, model: &Model) {
                 &model.latin_font,
                 message_text.to_owned(),
                 translation_text,
-                &model.translation_type,
+                &model.history.translation_type,
                 center_col.x(),
                 message_y,
                 translation_y,
@@ -499,7 +481,7 @@ fn draw_conversation(app: &App, model: &Model) {
             &model.latin_font,
             message_text.to_owned(),
             translation_text,
-            &model.translation_type,
+            &model.history.translation_type,
             center_col.x(),
             message_y,
             translation_y,
@@ -576,7 +558,7 @@ fn send_to_gemma(model: &mut Model, persona: GemmaPersona, message: &str) {
         GemmaPersona::Gemma2 => &model.gemma_2,
     };
     let gemma_handle = gemma.create_handle();
-    let history = &model.input_history;
+    let history = &model.history.entries;
     let contents = ai::generate_contents(&gemma.id, message, &gemma.prompt, history);
     let client = gemma.client.clone();
 
@@ -635,8 +617,7 @@ fn receive_gemmas(model: &mut Model) {
             let author = &model.gemma_1.id;
             if let Some((_, message)) = raw.split_once(": ") {
                 let history_item = HistoryItem::new(author, message);
-                add_history_item(model, history_item);
-                broadcast_history(model, None);
+                model.history.add(history_item);
             }
         }
     }
@@ -646,8 +627,7 @@ fn receive_gemmas(model: &mut Model) {
             let author = &model.gemma_2.id;
             if let Some((_, message)) = raw.split_once(": ") {
                 let history_item = HistoryItem::new(author, message);
-                add_history_item(model, history_item);
-                broadcast_history(model, None);
+                model.history.add(history_item);
             }
         }
     }
@@ -662,8 +642,6 @@ fn receive_human(model: &mut Model) {
         broadcast_history(model, Some(&writer));
         model.ws_writers.push(writer);
     }
-
-    let mut history_updated = false;
 
     // Drain everything that arrived since last frame
     while let Ok(raw) = model.ws_rx.try_recv() {
@@ -687,105 +665,16 @@ fn receive_human(model: &mut Model) {
             if text.ends_with('\n') {
                 let entry = HistoryItem::new(id, text);
                 send_to_gemma(model, GemmaPersona::Gemma1, &entry.msg);
-                add_history_item(model, entry);
+                model.history.add(entry);
                 // Clear the buffer
                 model.connections.remove(id);
-                history_updated = true;
             }
-        }
-    }
-
-    // 2) broadcast the updated history if it was updated
-    if history_updated {
-        println!(
-            "History updated for key {}, broadcasting history.",
-            model.next_history_idx - 1
-        );
-        broadcast_history(model, None);
-    }
-}
-
-// Remove oldest history entries if history is at capacity
-fn history_cleanup(model: &mut Model) {
-    while model.input_history.len() > MAX_HISTORY {
-        if let Some(smallest_key) = model.input_history.keys().next().copied() {
-            model.input_history.remove(&smallest_key);
-        }
-    }
-}
-
-fn add_history_item(model: &mut Model, item: HistoryItem) {
-    let key = model.next_history_idx;
-    model.input_history.insert(key, item);
-    model.next_history_idx += 1;
-    // trigger async translation of the history item's message here.
-    model.pending_translations.push(key);
-}
-
-fn process_translations(model: &mut Model) {
-    while !model.pending_translations.is_empty() {
-        if let Some(key) = model.pending_translations.pop() {
-            if let Some(item) = model.input_history.get(&key).cloned() {
-                if item.translation.is_none() && !item.msg.trim().is_empty() {
-                    // Set up shutdown signal listener
-                    let mut shutdown_rx = model.shutdown_tx.subscribe();
-                    // Set up translation pipeline
-                    let translate = model.translate.clone();
-                    let msg = item.msg.clone();
-                    let tx = model.translation_tx.clone();
-
-                    let translation_type = model.translation_type.clone();
-
-                    // Spawn async task to handle translation
-                    if let Some(runtime) = &model.translation_runtime {
-                        runtime.spawn(async move {
-                            // Spawn a shutdown future
-                            let shutdown = async {
-                                let _ = shutdown_rx.recv().await;
-                            };
-
-                            let task = async {
-                                let translation = match translation_type {
-                                    TranslationType::ToKorean => translate.to_korean(&msg).await,
-                                    TranslationType::ToEnglish => translate.to_english(&msg).await,
-                                    TranslationType::ToFrench => translate.to_french(&msg).await,
-                                };
-                                let _ = tx.send((key, translation));
-                            };
-
-                            tokio::select! {
-                                _ = shutdown => {
-                                    println!("Translation task received shutdown signal");
-                                }
-                                _ = task => {
-                                    println!("Translation task completed normally")
-                                }
-                            }
-                        });
-
-                        // only start one new translation per frame
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    // check for completed translations
-    while let Ok((key, translation)) = model.translation_rx.try_recv() {
-        if let Some(item) = model.input_history.get_mut(&key) {
-            item.translation = translation;
-            println!(
-                "Translation received for key {}, broadcasting history.",
-                key
-            );
-            broadcast_history(model, None);
         }
     }
 }
 
 fn broadcast_history(model: &Model, specific_target: Option<&Sender<String>>) {
-    let dump = serde_json::to_string(&History(model.input_history.clone())).unwrap();
+    let dump = model.history.serialize();
     if let Some(w) = specific_target {
         // send to specific
         let _ = w.send(dump.clone());
@@ -867,7 +756,7 @@ fn draw_debug(app: &App, model: &Model) {
     // Visualize FPS (Optional)
     draw.text(&format!(
         "FPS: {:.1}\nTranslation: {:?}",
-        model.fps.fps, model.translation_type
+        model.fps.fps, model.history.translation_type
     ))
     .x_y(rect.0 - 150.0, rect.1 - 30.0)
     .color(RED)
@@ -879,13 +768,13 @@ fn draw_debug(app: &App, model: &Model) {
 fn key_pressed(app: &App, model: &mut Model, key: Key) {
     match key {
         Key::Key1 => {
-            model.translation_type = TranslationType::ToKorean;
+            model.history.translation_type = TranslationType::ToKorean;
         }
         Key::Key2 => {
-            model.translation_type = TranslationType::ToEnglish;
+            model.history.translation_type = TranslationType::ToEnglish;
         }
         Key::Key3 => {
-            model.translation_type = TranslationType::ToFrench;
+            model.history.translation_type = TranslationType::ToFrench;
         }
         Key::P => {
             model.verbose = !model.verbose;
@@ -916,7 +805,8 @@ fn shutdown(model: &mut Model) {
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     // 4. Take ownership of runtimes
-    let translation_runtime = model.translation_runtime.take();
+    // todo: add method in History to handle this.
+    let translation_runtime = model.history.translation_runtime.take();
     let gemma_runtime = model.gemma_runtime.take();
 
     // 5. Spawn a dedicated thread to shut them down safely
@@ -952,7 +842,8 @@ impl Drop for Model {
         std::thread::sleep(std::time::Duration::from_millis(50));
 
         // Take the runtimes out to avoid issues
-        let _ = self.translation_runtime.take();
+        // todo: use history method to handle this
+        let _ = self.history.translation_runtime.take();
         let _ = self.gemma_runtime.take();
 
         // Set WebSocket shutdown flag if not already set
