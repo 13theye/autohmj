@@ -1,2 +1,2 @@
-pub mod ws_server;
-pub use ws_server::HMJServer;
+pub mod websocket;
+pub use websocket::HMJServer;
