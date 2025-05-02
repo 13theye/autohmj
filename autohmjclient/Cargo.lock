@@ -442,7 +442,6 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "toml",
- "tungstenite",
 ]
 
 [[package]]

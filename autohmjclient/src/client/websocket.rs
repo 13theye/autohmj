@@ -189,7 +189,7 @@ async fn run_client(
 
                 // Ping to keep connection alive
                 _ = tokio::time::sleep(Duration::from_secs(30)) => {
-                    if stream.send(Message::Ping(tungstenite::Bytes::new())).await.is_err() {
+                    if stream.send(Message::Ping(tokio_tungstenite::tungstenite::Bytes::new())).await.is_err() {
                         ws_stream = None;
                     }
                 }
