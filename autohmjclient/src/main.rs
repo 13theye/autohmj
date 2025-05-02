@@ -102,7 +102,7 @@ impl Model {
                             // send commit to server
                             let commit = HMJMessage(
                                 self.client_id.to_owned(),
-                                self.input_text.to_owned() + "\n",
+                                self.input_text.trim().to_owned() + "\n",
                             );
                             self.client.send(commit);
                             // clear the input field
