@@ -7,12 +7,15 @@ edition = "2021"
 [dependencies]
 autohmjcommon = { path = "../autohmjcommon" }
 eframe = "^0.31"
+futures-util = "0.3"
 hangeul = "0.4"
 rustkorean = "1.1"
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
+tokio = {version = "1", features=["full"]}
+tokio-tungstenite = "0.26"
 tungstenite = "0.26"
 
 [lib]

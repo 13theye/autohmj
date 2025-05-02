@@ -7,13 +7,10 @@
 use autohmjclient::config::Config;
 use eframe::{egui, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
-use std::{
-    collections::BTreeMap,
-    sync::mpsc::{channel, Receiver, Sender},
-};
-use tungstenite::{connect, Message};
+use std::collections::BTreeMap;
 
-use autohmjcommon::{History, HistoryItem};
+use autohmjclient::client::HMJClient;
+use autohmjcommon::{HMJMessage, History, HistoryItem};
 
 // The application state for the input-only window
 struct Model {
@@ -25,109 +22,28 @@ struct Model {
     input_focus_next_frame: bool,
     // text field id
     input_id: egui::Id,
-    // WebSocket for communicating with server/visualizer
-    ws_tx: Sender<String>,   // for sending commits
-    ws_rx: Receiver<String>, // for receiving history dumps
+
+    // WebSocket Client
+    client: HMJClient,
     client_id: String,
 }
 
 impl Model {
     fn new(cfg: Config) -> Self {
-        // Generate random client ID
+        // Get client ID from config
         let client_id = cfg.client.id;
-        let client_id_clone = client_id.clone();
 
-        // Prepare WebSocket client channels: one for outgoing, one for incoming history
-        let (ws_tx, ws_out_rx) = channel::<String>();
-        let (ws_in_tx, ws_rx) = channel::<String>();
-        let (status_tx, _status_rx) = channel::<bool>();
-
-        let ws_url = format!("ws://{}:{}", cfg.server.address, cfg.server.port);
-
-        // spawn WebSocket client thread
-        std::thread::spawn(move || {
-            let mut ws_opt: Option<
-                tungstenite::WebSocket<tungstenite::stream::MaybeTlsStream<std::net::TcpStream>>,
-            > = None;
-            let mut reconnect_delay = std::time::Duration::from_millis(500);
-            let max_reconnect_delay = std::time::Duration::from_secs(10);
-
-            loop {
-                // Try to connect if not connected
-                if ws_opt.is_none() {
-                    match connect(&ws_url) {
-                        Ok((mut socket, _)) => {
-                            // Set non-blocking mode on the TCP stream
-                            if let tungstenite::stream::MaybeTlsStream::Plain(tcp_stream) =
-                                socket.get_ref()
-                            {
-                                let _ = tcp_stream.set_nonblocking(true);
-                            }
-
-                            // Register with server
-                            let register_msg = format!("register|{}", client_id_clone);
-                            let _ = socket.send(Message::Text(register_msg.into()));
-
-                            ws_opt = Some(socket);
-                            let _ = status_tx.send(true);
-                            reconnect_delay = std::time::Duration::from_millis(100);
-                        }
-                        Err(_) => {
-                            let _ = status_tx.send(false);
-                            std::thread::sleep(reconnect_delay);
-                            reconnect_delay =
-                                std::cmp::min(reconnect_delay * 2, max_reconnect_delay);
-                            continue;
-                        }
-                    }
-                }
-
-                // Process WebSocket messages
-                let mut should_reconnect = false;
-
-                if let Some(ref mut socket) = ws_opt {
-                    // Send pending messages
-                    while let Ok(commit) = ws_out_rx.try_recv() {
-                        if socket.send(Message::Text(commit.into())).is_err() {
-                            should_reconnect = true;
-                            break;
-                        }
-                    }
-
-                    // Read incoming messages
-                    if !should_reconnect {
-                        match socket.read() {
-                            Ok(Message::Text(utf8)) => {
-                                let _ = ws_in_tx.send(utf8.to_string());
-                            }
-                            Err(tungstenite::Error::Io(ref e))
-                                if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                            Err(_) => {
-                                should_reconnect = true;
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-
-                // Handle reconnection if needed
-                if should_reconnect {
-                    ws_opt = None;
-                    let _ = status_tx.send(false);
-                }
-
-                std::thread::sleep(std::time::Duration::from_millis(3));
-            }
-        });
+        // Create async WebSocket client
+        let client = HMJClient::new(&cfg.server.address, cfg.server.port as u32, &client_id);
 
         Self {
             input_text: String::new(),
             input_history: BTreeMap::new(),
             input_focus_next_frame: true,
             input_id: egui::Id::new("input_field"),
-            ws_tx,
-            ws_rx,
-            client_id: client_id.clone(),
+
+            client,
+            client_id: client_id.to_owned(),
         }
     }
 
@@ -174,34 +90,30 @@ impl Model {
                             self.input_focus_next_frame = false;
                         }
 
+                        if response.lost_focus() {
+                            self.input_focus_next_frame = true;
+                        }
+
                         // push entry into history
-                        if response.lost_focus() && ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        if response.lost_focus()
+                            && !self.input_text.is_empty()
+                            && ctx.input(|i| i.key_pressed(egui::Key::Enter))
+                        {
                             // send commit to server
-                            let commit = format!("{}:{}\n", self.client_id, self.input_text);
-                            let _ = self.ws_tx.send(commit);
+                            let commit = HMJMessage(
+                                self.client_id.to_owned(),
+                                self.input_text.to_owned() + "\n",
+                            );
+                            self.client.send(commit);
                             // clear the input field
                             self.input_text.clear();
                             // keep the focus so they can type again immediately
                             response.request_focus();
-                        } else {
-                            // Stream current text (without newline = not committed)
-                            let payload = format!("{}:{}", self.client_id, self.input_text);
-                            let _ = self.ws_tx.send(payload);
-                        }
-
-                        // Drain any incoming history dumps
-                        while let Ok(dump) = self.ws_rx.try_recv() {
-                            if let Ok(History(full_history)) =
-                                serde_json::from_str::<History>(&dump)
-                            {
-                                println!(
-                                    "Received history update with {} items",
-                                    full_history.len()
-                                );
-                                self.input_history = full_history;
-                                //println!("      {:?}", self.input_history);
-                            }
-                        }
+                        } /*else {
+                              // Stream current text (without newline = not committed)
+                              let payload = format!("{}:{}", self.client_id, self.input_text);
+                              self.client.send(payload);
+                          }*/
                     });
                 });
             });
@@ -294,13 +206,26 @@ impl Model {
 
 impl eframe::App for Model {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Process incoming messages from server
+        while let Some(msg) = self.client.try_recv() {
+            match serde_json::from_str::<History>(&msg) {
+                Ok(History(full_history)) => {
+                    println!("Received history update with {} items", full_history.len());
+                    self.input_history = full_history;
+                }
+                Err(e) => {
+                    eprintln!("Error parsing response from server: {}", e);
+                }
+            }
+        }
+
         // Display the major UI elements
         self.build_input_frame(ctx);
         self.build_history_frame(ctx);
 
         // After the UI is built, stream the current text live:
-        let payload = format!("{}:{}", self.client_id, self.input_text);
-        let _ = self.ws_tx.send(payload);
+        let payload = HMJMessage(self.client_id.to_owned(), self.input_text.to_owned());
+        self.client.send(payload);
     }
 }
 
