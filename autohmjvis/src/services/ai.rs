@@ -16,7 +16,6 @@ pub struct GemmaInstance {
     model: String,
 }
 
-#[derive(Clone)]
 pub struct GemmaHandle {
     id: String,
     api_key: String,

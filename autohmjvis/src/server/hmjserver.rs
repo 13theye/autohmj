@@ -1,9 +1,10 @@
-// src/server/server.rs
+// src/server/hmjserver.rs
 //
 // Handle connections with performer client (autohmjclient)
 //
 // Needs tokio runtime because main app is sync
 
+use crate::models::HMJMessage;
 use futures_util::{SinkExt, StreamExt};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::{
@@ -17,12 +18,16 @@ pub struct HMJServer {
     port: u32,
 
     // Communication channels for Nannou integration
-    message_tx: mpsc::Sender<(String, String)>,
-    message_rx: mpsc::Receiver<(String, String)>,
+    message_tx: mpsc::Sender<HMJMessage>,
+    message_rx: mpsc::Receiver<HMJMessage>,
     broadcast_tx: broadcast::Sender<String>,
 
     // Clients
     clients: Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>,
+
+    // Client Registration channel
+    reg_tx: mpsc::Sender<String>,
+    reg_rx: mpsc::Receiver<String>,
 
     // Tokio runtime
     pub runtime: Option<tokio::runtime::Runtime>,
@@ -37,6 +42,7 @@ impl HMJServer {
         let (message_tx, message_rx) = mpsc::channel(16);
         let (broadcast_tx, _) = broadcast::channel(16);
         let (shutdown_tx, _) = broadcast::channel(1);
+        let (reg_tx, reg_rx) = mpsc::channel(16);
 
         Self {
             port,
@@ -44,6 +50,8 @@ impl HMJServer {
             message_rx,
             broadcast_tx,
             clients: Arc::new(Mutex::new(HashMap::new())),
+            reg_tx,
+            reg_rx,
             runtime: None,
             shutdown_tx,
         }
@@ -64,6 +72,7 @@ impl HMJServer {
         let mut shutdown_rx = self.shutdown_tx.subscribe();
         let port = self.port;
         let clients = self.clients.clone();
+        let reg_tx = self.reg_tx.clone();
 
         // Start server task
         runtime.spawn(async move {
@@ -89,10 +98,11 @@ impl HMJServer {
                                 let message_tx = message_tx.clone();
                                 let broadcast_tx = broadcast_tx.clone();
                                 let conn_shutdown_rx = shutdown_rx.resubscribe();
+                                let reg_tx = reg_tx.clone();
 
                                 tokio::spawn(async move {
                                     if let Err(e) = handle_connection(
-                                        stream, addr, clients, message_tx, broadcast_tx, conn_shutdown_rx
+                                        stream, addr, clients, message_tx, broadcast_tx, conn_shutdown_rx, reg_tx,
                                     ).await {
                                         eprintln!("Error connecting to client: {}", e);
                                     }
@@ -116,13 +126,39 @@ impl HMJServer {
     }
 
     /// Try to receive a message from clients (non-blocking)
-    pub fn try_recv(&mut self) -> Option<(String, String)> {
+    pub fn try_recv(&mut self) -> Option<HMJMessage> {
         self.message_rx.try_recv().ok()
     }
 
     /// Broadcast a message to all connected clients
     pub fn broadcast(&self, message: String) {
         let _ = self.broadcast_tx.send(message);
+    }
+
+    // Send a message to a particular client
+    pub fn send_to_client(&self, client_id: &str, message: String) {
+        if let Ok(clients) = self.clients.try_lock() {
+            if let Some(tx) = clients.get(client_id) {
+                if let Err(e) = tx.try_send(Message::Text(message.into())) {
+                    eprintln!("Error sending message to client {}: {}", client_id, e);
+                }
+            } else {
+                eprintln!(
+                    "Attempted to send message to unregistered client: {}",
+                    client_id
+                );
+            }
+        } else {
+            eprintln!(
+                "Could not acquire lock to send message to client: {}",
+                client_id
+            );
+        }
+    }
+
+    // Get newly registered clients
+    pub fn get_new_registrations(&mut self) -> Option<String> {
+        self.reg_rx.try_recv().ok()
     }
 
     /// Shutdown the server gracefully
@@ -140,7 +176,9 @@ impl HMJServer {
                     println!("Shutting down HMJServer runtime in separate thread...");
                     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
                 }
-            });
+            })
+            .join()
+            .ok();
         }
 
         println!("HMJServer shutdown complete");
@@ -151,9 +189,10 @@ async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
     clients: Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>,
-    message_tx: mpsc::Sender<(String, String)>,
+    message_tx: mpsc::Sender<HMJMessage>,
     broadcast_tx: broadcast::Sender<String>,
     shutdown_rx: broadcast::Receiver<()>,
+    reg_tx: mpsc::Sender<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Accept WebSocket Connection
     let ws_stream: WebSocketStream<TcpStream> = accept_async(stream)
@@ -219,6 +258,7 @@ async fn handle_connection(
         let clients = clients.clone();
         let message_tx = message_tx.clone();
         let client_tx = client_tx.clone();
+        let reg_tx = reg_tx.clone();
 
         tokio::spawn(async move {
             loop {
@@ -242,7 +282,13 @@ async fn handle_connection(
                                             let mut clients_lock = clients.lock().await;
                                             clients_lock.insert(id.clone(), client_tx.clone());
 
+                                            // Notice on new client registration
+                                            let _ = reg_tx.send(id.clone()).await;
+
                                             println!("Client registered: {} from {}", id, addr);
+
+                                            // Send history to client
+                                            // todo!()
                                             continue;
                                         }
                                     }
@@ -253,7 +299,16 @@ async fn handle_connection(
                                     };
 
                                     if !id.is_empty() {
-                                        let _ = message_tx.send((id, text.to_string())).await;
+                                        match serde_json::from_str::<HMJMessage>(&text) {
+                                            Ok(hmj_message) => {
+                                                if let Err(e) = message_tx.send(hmj_message).await {
+                                                    eprintln!("Failed to send message to channel: {}", e);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Failed to deserialize HMJMessage from text: {}\nError: {}", text, e);
+                                            }
+                                        }
                                     } else {
                                         eprintln!("Message from unregistered client: {}", addr);
                                     }

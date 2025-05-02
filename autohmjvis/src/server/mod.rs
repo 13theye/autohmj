@@ -1,2 +1,2 @@
-pub mod server;
-pub use server::HMJServer;
+pub mod hmjserver;
+pub use hmjserver::HMJServer;

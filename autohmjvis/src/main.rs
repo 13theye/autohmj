@@ -8,20 +8,14 @@ use nnpipe::*;
 use std::{
     collections::HashMap,
     fs,
-    net::TcpListener,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc::{channel, Receiver, Sender},
-        Arc,
-    },
+    sync::mpsc::{channel, Receiver, Sender},
     time::Instant,
 };
 use tokio::sync::broadcast;
-use tungstenite::{accept, Message};
 
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig},
-    models::{HistoryItem, HistoryManager},
+    models::{HMJMessage, HistoryItem, HistoryManager},
     server::HMJServer,
     services::{ai, GemmaInstance, TranslationType},
     views::BackgroundManager,
@@ -68,7 +62,6 @@ struct Model {
     verbose: bool,
 
     // graceful shutdown
-    ws_shutdown_flag: Arc<AtomicBool>,
     shutdown_tx: broadcast::Sender<()>,
 }
 
@@ -83,10 +76,6 @@ fn model(app: &App) -> Model {
     // Initialize HMJServer
     let mut server = HMJServer::new(config.server.port);
     server.start().expect("Failed to start HMJServer");
-
-    // Set up Shutdown Flag
-    let ws_shutdown_flag = Arc::new(AtomicBool::new(false));
-    let ws_shutdown_flag_clone = ws_shutdown_flag.clone();
 
     // Set up translation send/receive
     let (gemma_1_tx, gemma_1_rx) = channel::<Option<String>>();
@@ -227,7 +216,6 @@ fn model(app: &App) -> Model {
 
         verbose: false,
 
-        ws_shutdown_flag,
         shutdown_tx,
     }
 }
@@ -250,6 +238,14 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 
     // Handle the background
     model.background.draw(&model.draw, app.time);
+
+    // Check for new client registrations
+    while let Some(client_id) = model.server.get_new_registrations() {
+        // Send history to this specific client
+        model
+            .server
+            .send_to_client(&client_id, model.history.serialize());
+    }
 
     // Receive incoming datagrams and update connections
     receive_human(model);
@@ -472,7 +468,7 @@ fn render_and_post(app: &App, model: &mut Model) {
 
 fn receive_human(model: &mut Model) {
     // Receive WebSocket messages
-    while let Some((id, text)) = model.server.try_recv() {
+    while let Some(HMJMessage(id, text)) = model.server.try_recv() {
         // Update connections map for live display or finalize messages
         if text.ends_with('\n') {
             // Committed message

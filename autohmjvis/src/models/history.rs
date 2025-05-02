@@ -6,7 +6,7 @@ use crate::services::{ai, GemmaInstance, Translate, TranslationType};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio::sync::{broadcast, mpsc};
 // Re-export History Types
-pub use autohmjcommon::{History, HistoryItem};
+pub use autohmjcommon::{HMJMessage, History, HistoryItem};
 
 // Maximum number of entries in the history
 const MAX_HISTORY: usize = 100;
