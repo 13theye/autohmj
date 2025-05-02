@@ -361,5 +361,6 @@ async fn handle_connection(
 impl Drop for HMJServer {
     fn drop(&mut self) {
         println!("HMJServer being dropped");
+        self.shutdown();
     }
 }

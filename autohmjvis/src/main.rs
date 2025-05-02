@@ -673,23 +673,20 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
 fn shutdown(model: &mut Model) {
     println!("Initiating graceful shutdown...");
 
-    // 1. Signal WebSocket threads to terminate
-    model.server.shutdown();
-
-    // 2. Signal all Tokio tasks to terminate
+    // 1. Signal all Tokio tasks to terminate
     println!("Sending shutdown signal to async tasks...");
     let _ = model.shutdown_tx.send(());
 
-    // 3. Give WebSocket threads and async tasks time to terminate
+    // 2. Give WebSocket threads and async tasks time to terminate
     println!("Waiting for connections to close...");
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    // 4. Take ownership of runtimes
+    // 3. Take ownership of runtimes
     // todo: add method in History to handle this.
     let translation_runtime = model.history.translation_runtime.take();
     let gemma_runtime = model.gemma_runtime.take();
 
-    // 5. Spawn a dedicated thread to shut them down safely
+    // 4. Spawn a dedicated thread to shut them down safely
     if translation_runtime.is_some() || gemma_runtime.is_some() {
         std::thread::spawn(move || {
             if let Some(runtime) = translation_runtime {
@@ -714,18 +711,10 @@ fn shutdown(model: &mut Model) {
 impl Drop for Model {
     fn drop(&mut self) {
         println!("Model being dropped");
-
-        // Same as in shutdown - signal tasks to terminate
-        let _ = self.shutdown_tx.send(());
+        shutdown(self);
 
         // Wait briefly
         std::thread::sleep(std::time::Duration::from_millis(50));
-
-        // Take the runtimes out to avoid issues
-        // todo: use history method to handle this
-        let _ = self.history.translation_runtime.take();
-        let _ = self.gemma_runtime.take();
-        let _ = self.server.runtime.take();
     }
 }
 
