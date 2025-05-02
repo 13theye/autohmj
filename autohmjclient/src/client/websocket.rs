@@ -90,21 +90,36 @@ impl Drop for HMJClient {
         // Graceful shutdown
         if let Some(runtime) = &self.runtime {
             let (tx, rx) = oneshot::channel();
-            let _ = self.command_tx.blocking_send(Command::Shutdown(tx));
 
-            // wait for confirmation or timeout
-            runtime.block_on(async {
-                tokio::select! {
-                    _ = rx => {}
-                    _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            // Send shutdown command
+            let send_result = self.command_tx.blocking_send(Command::Shutdown(tx));
+
+            if send_result.is_ok() {
+                // Wait for confirmation with a longer timeout
+                let shutdown_success = runtime.block_on(async {
+                    tokio::select! {
+                        _ = rx => true,
+                        _ = tokio::time::sleep(Duration::from_secs(3)) => false,
+                    }
+                });
+
+                if !shutdown_success {
+                    eprintln!("Graceful WebSocket shutdown timed out, forcing termination");
                 }
-            });
+            } else {
+                eprintln!("Could not send shutdown command, forcing termination");
+            }
 
+            // Always abort task to revent hanging
             if let Some(handle) = self.task_handle.take() {
                 runtime.block_on(async {
                     handle.abort();
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 });
             }
+
+            // Explicitly drop the runtime
+            drop(self.runtime.take());
         }
     }
 }
@@ -118,9 +133,15 @@ async fn run_client(
 ) {
     let mut ws_stream: Option<WsStream> = None;
     let mut reconnect_delay = Duration::from_millis(100);
-    let max_reconnect_delay = Duration::from_secs(10);
+    let max_reconnect_delay = Duration::from_secs(5);
 
     loop {
+        // Check for shutdown command before attempting connection
+        if let Ok(Command::Shutdown(tx)) = command_rx.try_recv() {
+            let _ = tx.send(());
+            return;
+        }
+
         // Try to connect if not connected
         if ws_stream.is_none() {
             match connect_async(&server_url).await {
@@ -130,16 +151,34 @@ async fn run_client(
                     if let Err(e) = stream.send(Message::Text(register_msg.into())).await {
                         eprintln!("Failed to register with server: {}", e);
                         ws_stream = None;
-                        tokio::time::sleep(reconnect_delay).await;
+
+                        // Break long sleep into smaller chunks with command checks
+                        for _ in 0..20 {
+                            if let Ok(Command::Shutdown(tx)) = command_rx.try_recv() {
+                                let _ = tx.send(());
+                                return;
+                            }
+                            tokio::time::sleep(reconnect_delay / 20).await;
+                        }
                         reconnect_delay = std::cmp::min(reconnect_delay * 2, max_reconnect_delay);
                         continue;
                     }
+
                     ws_stream = Some(stream);
                     reconnect_delay = Duration::from_millis(100);
                 }
                 Err(e) => {
                     eprintln!("Failed to connect: {}", e);
-                    tokio::time::sleep(reconnect_delay).await;
+
+                    // Break long sleep into smaller chunks with command checks
+                    for _ in 0..20 {
+                        if let Ok(Command::Shutdown(tx)) = command_rx.try_recv() {
+                            let _ = tx.send(());
+                            return;
+                        }
+                        tokio::time::sleep(reconnect_delay / 20).await;
+                    }
+
                     reconnect_delay = std::cmp::min(reconnect_delay * 2, max_reconnect_delay);
                     continue;
                 }
