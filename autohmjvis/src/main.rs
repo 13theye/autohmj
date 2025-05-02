@@ -364,7 +364,7 @@ fn draw_conversation(app: &App, model: &Model) {
     }
 
     // Draw human's current input OR history item if no input is in progress
-    if model.connections.is_empty() {
+    if model.connections.is_empty() || model.connections.values().all(|msg| msg.is_empty()) {
         if let Some(item) = latest_human {
             let message_text = item.msg.trim();
             let translation_text = match &item.translation {
