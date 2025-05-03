@@ -30,15 +30,15 @@ impl HMJMessage {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct HistoryItem {
     pub author: String,
-    pub msg: String,
+    pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub translation: Option<String>,
 }
 impl HistoryItem {
-    pub fn new(author: &str, msg: &str) -> Self {
+    pub fn new(author: &str, message: &str) -> Self {
         Self {
             author: author.to_owned(),
-            msg: msg.to_owned(),
+            message: message.to_owned(),
             translation: None,
         }
     }
