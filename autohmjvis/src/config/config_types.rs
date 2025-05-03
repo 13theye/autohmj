@@ -54,5 +54,6 @@ pub struct GoogleConfig {
 #[derive(Debug, Deserialize)]
 pub struct PersonaConfig {
     pub id: String,
+    pub model: String,
     pub prompt: String,
 }

@@ -2,11 +2,12 @@
 //
 // Input history and translations
 
-use crate::services::{ai, GemmaInstance, Translate, TranslationType};
-use std::{collections::BTreeMap, sync::Arc};
+use crate::services::{Translate, TranslationType};
+use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
+
 // Re-export History Types
-pub use autohmjcommon::{HMJMessage, History, HistoryItem};
+pub use autohmjcommon::{HMJMessage, History, HistoryItem, HistoryWrapper};
 
 // Maximum number of entries in the history
 const MAX_HISTORY: usize = 100;
@@ -15,7 +16,7 @@ const MAX_HISTORY: usize = 100;
 // Each HistoryItem contains the input from the client and its translation.
 // HistoryManager fires off tasks to fetch translations for each entry once received.
 pub struct HistoryManager {
-    pub entries: BTreeMap<usize, HistoryItem>,
+    pub entries: History,
     pub next_history_idx: usize,
 
     // Translation
@@ -46,7 +47,7 @@ impl HistoryManager {
         let shutdown_rx = shutdown.subscribe();
 
         Self {
-            entries: BTreeMap::new(),
+            entries: History::default(),
             next_history_idx: 0,
 
             translate: Arc::new(Translate::default()),
@@ -60,6 +61,11 @@ impl HistoryManager {
 
             needs_broadcast: false,
         }
+    }
+
+    // Create and return a HistoryItem
+    pub fn new_item(author: &str, msg: &str) -> HistoryItem {
+        HistoryItem::new(author, msg)
     }
 
     // Run once per cycle to manage the history queue and send off pending translation requests
@@ -166,7 +172,7 @@ impl HistoryManager {
 
     // Convert History to a serialized string
     pub fn serialize(&self) -> String {
-        let result = serde_json::to_string(&History(self.entries.clone()));
+        let result = serde_json::to_string(&HistoryWrapper(self.entries.clone()));
         match result {
             Ok(string) => string,
             Err(e) => {

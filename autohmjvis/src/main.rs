@@ -15,9 +15,9 @@ use tokio::sync::broadcast;
 
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig},
-    models::{HMJMessage, HistoryItem, HistoryManager},
+    models::{HMJMessage, HistoryManager},
     server::HMJServer,
-    services::{ai, GemmaInstance, TranslationType},
+    services::TranslationType,
     views::BackgroundManager,
 };
 
@@ -29,16 +29,6 @@ struct Model {
 
     // History and Translation
     history: HistoryManager,
-
-    // AI
-    gemma_1: GemmaInstance,
-    gemma_1_tx: Sender<Option<String>>,
-    gemma_1_rx: Receiver<Option<String>>,
-    gemma_2: GemmaInstance,
-    gemma_2_tx: Sender<Option<String>>,
-    gemma_2_rx: Receiver<Option<String>>,
-
-    gemma_runtime: Option<tokio::runtime::Runtime>,
 
     korean_font: Font,
     latin_font: Font,
@@ -76,10 +66,6 @@ fn model(app: &App) -> Model {
     // Initialize HMJServer
     let mut server = HMJServer::new(config.server.port);
     server.start().expect("Failed to start HMJServer");
-
-    // Set up translation send/receive
-    let (gemma_1_tx, gemma_1_rx) = channel::<Option<String>>();
-    let (gemma_2_tx, gemma_2_rx) = channel::<Option<String>>();
 
     // --- Load Font for Nannou Draw ---
     // Assumes "assets/gulim.ttf" exists relative to the executable
@@ -174,30 +160,11 @@ fn model(app: &App) -> Model {
     // Set up history manager
     let history = HistoryManager::new(&shutdown_tx);
 
-    // Set up Gemma runtime
-    let gemma_runtime = tokio::runtime::Runtime::new().expect("Failed to create Gemma runtime");
-
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         text_layout,
 
         history,
-
-        gemma_1: GemmaInstance::new(
-            gemma_config.persona_1.id,
-            gemma_config.persona_1.prompt,
-            auth_config.google.api_key.clone(),
-        ),
-        gemma_2: GemmaInstance::new(
-            gemma_config.persona_2.id,
-            gemma_config.persona_2.prompt,
-            auth_config.google.api_key,
-        ),
-        gemma_1_tx,
-        gemma_1_rx,
-        gemma_2_tx,
-        gemma_2_rx,
-        gemma_runtime: Some(gemma_runtime),
 
         korean_font,
         latin_font,
@@ -249,7 +216,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 
     // Receive incoming datagrams and update connections
     receive_human(model);
-    receive_gemmas(model);
+    //receive_gemmas(model);
 
     model.history.update();
 
@@ -472,7 +439,7 @@ fn receive_human(model: &mut Model) {
         // Update connections map for live display or finalize messages
         if text.ends_with('\n') {
             // Committed message
-            let entry = HistoryItem::new(&id, &text);
+            let entry = HistoryManager::new_item(&id, &text);
             send_to_gemma(model, GemmaPersona::Gemma1, &entry.msg);
             model.history.add(entry);
             // Clear the buffer
@@ -484,72 +451,13 @@ fn receive_human(model: &mut Model) {
     }
 }
 
-// ************************ AI API *************************************************
-fn send_to_gemma(model: &mut Model, persona: GemmaPersona, message: &str) {
-    let gemma = match persona {
-        GemmaPersona::Gemma1 => &model.gemma_1,
-        GemmaPersona::Gemma2 => &model.gemma_2,
-    };
-    let gemma_handle = gemma.create_handle();
-    let history = &model.history.entries;
-    let contents = ai::generate_contents(&gemma.id, message, &gemma.prompt, history);
-    let client = gemma.client.clone();
-
-    let tx = match persona {
-        GemmaPersona::Gemma1 => model.gemma_1_tx.clone(),
-        GemmaPersona::Gemma2 => model.gemma_2_tx.clone(),
-    };
-
-    // Shutdown message receiver
-    let mut shutdown_rx = model.shutdown_tx.subscribe();
-
-    if let Some(runtime) = &model.gemma_runtime {
-        runtime.spawn(async move {
-            println!("Inside Gemma async task.");
-
-            // Create a future that completes on shutdown signal
-            let shutdown = async {
-                let _ = shutdown_rx.recv().await;
-            };
-
-            let task = async {
-                match gemma_handle.generate_response(contents, client).await {
-                    Ok(response) => {
-                        println!("Received successful response of length {}", response.len());
-
-                        let gemma_msg = format!("Gemma: {}\n", response);
-                        println!("{}", gemma_msg);
-                        let _ = tx.send(Some(gemma_msg));
-                    }
-                    Err(e) => {
-                        eprintln!("Gemma API error: {}", e);
-                        if let Some(source) = e.source() {
-                            eprintln!("Error source: {}", source);
-                        }
-                    }
-                }
-            };
-
-            // Race between the shutdown signal and the task
-            tokio::select! {
-                _ = shutdown => {
-                    println!("Gemma task received shutdown signal");
-                }
-                _ = task => {
-                    println!("Gemma task completed normally");
-                }
-            }
-        });
-    }
-}
-
-fn receive_gemmas(model: &mut Model) {
+fn _receive_gemmas(model: &mut Model) {
     // check for Gemma responses
     while let Ok(response) = model.gemma_1_rx.try_recv() {
         if let Some(raw) = response {
             let author = &model.gemma_1.id;
             if let Some((_, message)) = raw.split_once(": ") {
-                let history_item = HistoryItem::new(author, message);
+                let history_item = HistoryManager::new_item(author, message);
                 model.history.add(history_item);
             }
         }
@@ -559,7 +467,7 @@ fn receive_gemmas(model: &mut Model) {
         if let Some(raw) = response {
             let author = &model.gemma_2.id;
             if let Some((_, message)) = raw.split_once(": ") {
-                let history_item = HistoryItem::new(author, message);
+                let history_item = HistoryManager::new_item(author, message);
                 model.history.add(history_item);
             }
         }
