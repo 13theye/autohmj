@@ -1,12 +1,14 @@
 // lib.rs
 //
-// data structures for Auto-HMJ
+// data structures shared between Auto-HMJ client and server
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+pub type History = BTreeMap<usize, HistoryItem>;
+
 #[derive(Deserialize, Serialize)]
-pub struct History(pub BTreeMap<usize, HistoryItem>);
+pub struct HistoryWrapper(pub History);
 
 // Wrapper for HMJ Client/Server message: (client_id, message_text)
 #[derive(Deserialize, Serialize)]
