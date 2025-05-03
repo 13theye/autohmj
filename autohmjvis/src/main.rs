@@ -5,19 +5,14 @@
 
 use nannou::{prelude::*, text::*};
 use nnpipe::*;
-use std::{
-    collections::HashMap,
-    fs,
-    sync::mpsc::{channel, Receiver, Sender},
-    time::Instant,
-};
+use std::{collections::HashMap, fs, time::Instant};
 use tokio::sync::broadcast;
 
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig},
     models::{HMJMessage, HistoryManager},
     server::HMJServer,
-    services::TranslationType,
+    services::{GemmaManager, TranslationType},
     views::BackgroundManager,
 };
 
@@ -30,10 +25,13 @@ struct Model {
     // History and Translation
     history: HistoryManager,
 
+    // AI
+    ai: GemmaManager,
+
     korean_font: Font,
     latin_font: Font,
 
-    // WebSockets
+    // WebSockets for client
     server: HMJServer,
     connections: HashMap<String, String>,
 
@@ -160,11 +158,15 @@ fn model(app: &App) -> Model {
     // Set up history manager
     let history = HistoryManager::new(&shutdown_tx);
 
+    // Set up Gemma
+    let ai = GemmaManager::new(&gemma_config, &auth_config.google.api_key, &shutdown_tx);
+
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         text_layout,
 
         history,
+        ai,
 
         korean_font,
         latin_font,
@@ -216,7 +218,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 
     // Receive incoming datagrams and update connections
     receive_human(model);
-    //receive_gemmas(model);
+    receive_gemmas(model);
 
     model.history.update();
 
@@ -254,31 +256,9 @@ fn draw_conversation(app: &App, model: &Model) {
         Rect::from_x_y_w_h(rect.right() + column_width / 3.0, 0.0, column_width, height);
 
     // Find the most recent message from each speaker
-    let mut latest_gemma1 = None;
-    let mut latest_human = None;
-    let mut latest_gemma2 = None;
-
-    let gemma_1 = &model.gemma_1.id;
-    let gemma_2 = &model.gemma_2.id;
-
-    // Since BTreeMap is ordered by key, reverse iteration gives us the most recent messages first
-    for (_, item) in model.history.entries.iter().rev() {
-        if item.author == *gemma_1 {
-            latest_gemma1 = Some(item);
-        } else if item.author == *gemma_2 {
-            latest_gemma2 = Some(item);
-        } else {
-            // Any author that is not one of the Gemma instances is considered a human
-            latest_human = Some(item);
-        }
-
-        // Stop once we've found one message from each speaker
-        if (latest_gemma1.is_some() && latest_human.is_some())
-            || latest_gemma2.is_some() && latest_human.is_some()
-        {
-            break;
-        }
-    }
+    let latest_gemma1 = model.history.get_latest("Uri");
+    let latest_human = model.history.get_latest("Human");
+    let latest_gemma2 = model.history.get_latest("Ani");
 
     // Position for message display (upper third of each column)
     let message_y = rect.top() - 50.0;
@@ -286,7 +266,7 @@ fn draw_conversation(app: &App, model: &Model) {
 
     // Draw the most recent message from Gemma 1
     if let Some(item) = latest_gemma1 {
-        let message_text = item.msg.trim();
+        let message_text = item.message.trim();
         let translation_text = match &item.translation {
             Some(translation) => format!("({})", translation.trim()),
             None => String::new(),
@@ -309,7 +289,7 @@ fn draw_conversation(app: &App, model: &Model) {
 
     // Draw the most recent message from Gemma 2
     if let Some(item) = latest_gemma2 {
-        let message_text = item.msg.trim();
+        let message_text = item.message.trim();
         let translation_text = match &item.translation {
             Some(translation) => format!("({})", translation.trim()),
             None => String::new(),
@@ -333,7 +313,7 @@ fn draw_conversation(app: &App, model: &Model) {
     // Draw human's current input OR history item if no input is in progress
     if model.connections.is_empty() || model.connections.values().all(|msg| msg.is_empty()) {
         if let Some(item) = latest_human {
-            let message_text = item.msg.trim();
+            let message_text = item.message.trim();
             let translation_text = match &item.translation {
                 Some(translation) => format!("({})", translation.trim()),
                 None => String::new(),
@@ -440,7 +420,11 @@ fn receive_human(model: &mut Model) {
         if text.ends_with('\n') {
             // Committed message
             let entry = HistoryManager::new_item(&id, &text);
-            send_to_gemma(model, GemmaPersona::Gemma1, &entry.msg);
+
+            // Temporary key until ordering is solved
+            let key = "Uri";
+
+            let _ = model.ai.send(key, &entry.message, &model.history.entries);
             model.history.add(entry);
             // Clear the buffer
             model.connections.remove(&id);
@@ -451,26 +435,15 @@ fn receive_human(model: &mut Model) {
     }
 }
 
-fn _receive_gemmas(model: &mut Model) {
-    // check for Gemma responses
-    while let Ok(response) = model.gemma_1_rx.try_recv() {
-        if let Some(raw) = response {
-            let author = &model.gemma_1.id;
-            if let Some((_, message)) = raw.split_once(": ") {
-                let history_item = HistoryManager::new_item(author, message);
-                model.history.add(history_item);
-            }
-        }
-    }
+fn receive_gemmas(model: &mut Model) {
+    // Trigger AI Manager to collect responses
+    model.ai.receive_all();
 
-    while let Ok(response) = model.gemma_2_rx.try_recv() {
-        if let Some(raw) = response {
-            let author = &model.gemma_2.id;
-            if let Some((_, message)) = raw.split_once(": ") {
-                let history_item = HistoryManager::new_item(author, message);
-                model.history.add(history_item);
-            }
-        }
+    // Turn the queued responses into HistoryItem entries
+    while model.ai.has_queued_responses() {
+        let response = model.ai.responses_pop_front().unwrap();
+        let entry = HistoryManager::new_item(&response.author, &response.message);
+        model.history.add(entry);
     }
 }
 
@@ -592,22 +565,15 @@ fn shutdown(model: &mut Model) {
     // 3. Take ownership of runtimes
     // todo: add method in History to handle this.
     let translation_runtime = model.history.translation_runtime.take();
-    let gemma_runtime = model.gemma_runtime.take();
 
     // 4. Spawn a dedicated thread to shut them down safely
-    if translation_runtime.is_some() || gemma_runtime.is_some() {
+    if translation_runtime.is_some() {
         std::thread::spawn(move || {
             if let Some(runtime) = translation_runtime {
                 println!("Shutting down translation runtime in separate thread...");
                 runtime.shutdown_timeout(std::time::Duration::from_secs(1));
             }
-
-            if let Some(runtime) = gemma_runtime {
-                println!("Shutting down Gemma runtime in separate thread...");
-                runtime.shutdown_timeout(std::time::Duration::from_secs(1));
-            }
-
-            println!("Tokio runtimes shutdown complete");
+            println!("Translation runtime shutdown complete");
         })
         .join()
         .ok(); // Wait for the thread to complete
@@ -624,15 +590,4 @@ impl Drop for Model {
         // Wait briefly
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-}
-
-enum GemmaPersona {
-    Gemma1,
-    Gemma2,
-}
-
-enum Players {
-    Human,
-    Gemma1,
-    Gemma2,
 }

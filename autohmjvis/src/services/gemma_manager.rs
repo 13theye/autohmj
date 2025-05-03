@@ -4,15 +4,18 @@
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, error::Error};
+use std::{
+    collections::{HashMap, VecDeque},
+    error::Error,
+};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::config::GemmaConfig;
-use autohmjcommon::History;
+use crate::{config::GemmaConfig, models::History};
 
 pub struct GemmaManager {
     runtime: Option<tokio::runtime::Runtime>,
-    instances: HashMap<String, GemmaInstance>, //<id, GemmaInstance>
+    pub instances: HashMap<String, GemmaInstance>, //<id, GemmaInstance>
+    responses: VecDeque<GemmaResponse>,            // collected responses from Gemma API
 
     // Reqwest client
     client: Client,
@@ -25,14 +28,16 @@ pub struct GemmaManager {
 }
 
 impl GemmaManager {
-    pub fn new(api_key: &str, shutdown: broadcast::Sender<()>) -> Self {
+    pub fn new(config: &GemmaConfig, api_key: &str, shutdown: &broadcast::Sender<()>) -> Self {
         let runtime =
             tokio::runtime::Runtime::new().expect("Failed to start Tokio runtime for GemmaManager");
         let shutdown_rx = shutdown.subscribe();
+        let instances = make_personas_from_config(config);
 
         Self {
             runtime: Some(runtime),
-            instances: HashMap::new(),
+            instances,
+            responses: VecDeque::new(),
             client: Client::new(),
             api_key: api_key.to_owned(),
             shutdown_rx,
@@ -96,39 +101,30 @@ impl GemmaManager {
         }
     }
 
-    pub fn try_recv(&mut self, gemma_id: &str) -> Option<String> {
-        if let Some(instance) = self.instances.get_mut(gemma_id) {
+    pub fn receive_all(&mut self) {
+        for instance in self.instances.values_mut() {
             if let Ok(Some(message)) = instance.rx.try_recv() {
-                return Some(message);
+                let response = GemmaResponse {
+                    author: instance.id.to_owned(),
+                    message,
+                };
+                self.responses.push_back(response);
             }
         }
-        None
     }
 
-    // an overly specific function to create and add two Gemmas from the config file
-    pub fn make_both_from_config(&mut self, config: &GemmaConfig) {
-        let gemma1 = GemmaInstance::new(
-            &config.persona_1.id,
-            Personality {
-                prompt: config.persona_1.prompt.to_owned(),
-            },
-            &config.persona_1.model,
-        );
-
-        let gemma2 = GemmaInstance::new(
-            &config.persona_2.id,
-            Personality {
-                prompt: config.persona_2.prompt.to_owned(),
-            },
-            &config.persona_2.model,
-        );
-
-        self.add(gemma1);
-        self.add(gemma2);
-    }
-
-    fn add(&mut self, instance: GemmaInstance) {
+    // Add a new Gemma Instance to the Manager
+    pub fn add(&mut self, instance: GemmaInstance) {
         self.instances.insert(instance.id.clone(), instance);
+    }
+
+    // Pop the first entry in the queue of reponses
+    pub fn responses_pop_front(&mut self) -> Option<GemmaResponse> {
+        self.responses.pop_front()
+    }
+
+    pub fn has_queued_responses(&self) -> bool {
+        !self.responses.is_empty()
     }
 
     pub fn shutdown(&mut self) {
@@ -154,6 +150,34 @@ impl Drop for GemmaManager {
         // Wait briefly
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
+}
+
+// an overly specific function to create and add two Gemmas from the config file
+pub fn make_personas_from_config(config: &GemmaConfig) -> HashMap<String, GemmaInstance> {
+    let mut personas = HashMap::new();
+
+    let gemma1 = GemmaInstance::new(
+        &config.persona_1.id,
+        Personality {
+            prompt: config.persona_1.prompt.to_owned(),
+        },
+        &config.persona_1.model,
+    );
+    println!("Gemma1 ID: {:?}", gemma1.id);
+    let gemma2 = GemmaInstance::new(
+        &config.persona_2.id,
+        Personality {
+            prompt: config.persona_2.prompt.to_owned(),
+        },
+        &config.persona_2.model,
+    );
+
+    println!("Gemma2 ID: {:?}", gemma2.id);
+
+    personas.insert(gemma1.id.to_owned(), gemma1);
+    personas.insert(gemma2.id.to_owned(), gemma2);
+
+    personas
 }
 
 // Sends a Rest API request to Google Gemini
@@ -194,10 +218,9 @@ async fn generate_response(
     let response_text = http_response.text().await?;
     println!("Raw response: {}", response_text);
 
-    let response: GemmaResponse = serde_json::from_str(&response_text)?;
+    let response: GemmaRawResponse = serde_json::from_str(&response_text)?;
 
     // Extract text from the first candidate's content
-    println!("Gemma raw response: {:?}", response);
     if let Some(candidate) = response.candidates.first() {
         if let Some(part) = candidate.content.parts.first() {
             return Ok(part.text.clone());
@@ -207,6 +230,7 @@ async fn generate_response(
     Err("No response generated".into())
 }
 
+#[derive(Debug)]
 pub struct GemmaInstance {
     pub id: String,
     personality: Personality,
@@ -255,7 +279,7 @@ impl GemmaInstance {
             contents.push(RequestContent {
                 role: role.to_owned(),
                 parts: vec![Part {
-                    text: item.msg.to_owned(),
+                    text: item.message.to_owned(),
                 }],
             });
         }
@@ -273,8 +297,15 @@ impl GemmaInstance {
 }
 
 // A wrapper for a prompt defining a Gemma personality
+#[derive(Debug)]
 pub struct Personality {
     pub prompt: String,
+}
+
+// A parsed response from a Gemma persona
+pub struct GemmaResponse {
+    pub author: String,
+    pub message: String,
 }
 
 /********************* API types ************************************* */
@@ -316,10 +347,10 @@ struct Part {
     text: String,
 }
 
-// The Gemma response as definied by Gemini API
+// The Gemma raw response as definied by Gemini API
 #[allow(dead_code)]
 #[derive(Debug, Deserialize, Default)]
-struct GemmaResponse {
+struct GemmaRawResponse {
     #[serde(default)]
     candidates: Vec<Candidate>,
     #[serde(default)]

@@ -64,14 +64,23 @@ impl HistoryManager {
     }
 
     // Create and return a HistoryItem
-    pub fn new_item(author: &str, msg: &str) -> HistoryItem {
-        HistoryItem::new(author, msg)
+    pub fn new_item(author: &str, message: &str) -> HistoryItem {
+        HistoryItem::new(author, message)
     }
 
     // Run once per cycle to manage the history queue and send off pending translation requests
     pub fn update(&mut self) {
         self.cleanup();
         self.process_translation_queue();
+    }
+
+    // Get a reference to the most recent HistoryItem from a given author
+    pub fn get_latest(&self, author: &str) -> Option<&HistoryItem> {
+        self.entries
+            .iter()
+            .rev()
+            .map(|(_, item)| item)
+            .find(|&item| item.author == *author)
     }
     /************************* Input History management *****************************/
 
@@ -109,10 +118,10 @@ impl HistoryManager {
         while !self.translation_queue.is_empty() {
             if let Some(key) = self.translation_queue.pop() {
                 if let Some(item) = self.entries.get(&key) {
-                    if item.translation.is_none() && !item.msg.trim().is_empty() {
+                    if item.translation.is_none() && !item.message.trim().is_empty() {
                         self.request_translation(
                             key,
-                            item.msg.clone(),
+                            item.message.clone(),
                             self.translate.clone(),
                             self.translation_type.clone(),
                         );
