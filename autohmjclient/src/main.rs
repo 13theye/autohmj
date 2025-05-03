@@ -10,14 +10,14 @@ use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
 use std::collections::BTreeMap;
 
 use autohmjclient::client::HMJClient;
-use autohmjcommon::{HMJMessage, History, HistoryItem};
+use autohmjcommon::{HMJMessage, History, HistoryWrapper};
 
 // The application state for the input-only window
 struct Model {
     // input from the user
     input_text: String,
     // History of submitted lines
-    input_history: BTreeMap<usize, HistoryItem>,
+    input_history: History,
     // Flag to request focus next frame
     input_focus_next_frame: bool,
     // text field id
@@ -177,7 +177,7 @@ impl Model {
                                 ui.vertical(|ui| {
                                     // Original message
                                     ui.label(
-                                        egui::RichText::new(entry.msg.trim_end())
+                                        egui::RichText::new(entry.message.trim_end())
                                             .monospace()
                                             .size(20.0)
                                             .color(egui::Color32::WHITE),
@@ -208,8 +208,8 @@ impl eframe::App for Model {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Process incoming messages from server
         while let Some(msg) = self.client.try_recv() {
-            match serde_json::from_str::<History>(&msg) {
-                Ok(History(full_history)) => {
+            match serde_json::from_str::<HistoryWrapper>(&msg) {
+                Ok(HistoryWrapper(full_history)) => {
                     println!("Received history update with {} items", full_history.len());
                     self.input_history = full_history;
                 }
