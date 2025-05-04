@@ -3,7 +3,7 @@
 // Input history and translations
 
 use crate::services::{Translate, TranslationType};
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{broadcast, mpsc};
 
 // Re-export History Types
@@ -20,8 +20,8 @@ pub struct HistoryManager {
     pub next_history_idx: usize,
 
     // Translation
-    translate: Arc<Translate>,     // Translation API entry point
-    translation_queue: Vec<usize>, // Keys of items awaiting translation
+    translate: Arc<Translate>,          // Translation API entry point
+    translation_queue: VecDeque<usize>, // Keys of items awaiting translation
     pub translation_type: TranslationType,
 
     // Asynchronous translation
@@ -51,7 +51,7 @@ impl HistoryManager {
             next_history_idx: 0,
 
             translate: Arc::new(Translate::default()),
-            translation_queue: Vec::new(),
+            translation_queue: VecDeque::new(),
             translation_type: TranslationType::ToEnglish,
             translation_runtime: Some(translation_runtime),
             shutdown_rx,
@@ -109,14 +109,14 @@ impl HistoryManager {
 
     // Add a key to the translation queue
     fn queue_for_translation(&mut self, key: usize) {
-        self.translation_queue.push(key);
+        self.translation_queue.push_back(key);
     }
 
     // Checks that a translation queue item is valid and sends it off to translation API
     // Receives any completed translations
     fn process_translation_queue(&mut self) {
         while !self.translation_queue.is_empty() {
-            if let Some(key) = self.translation_queue.pop() {
+            if let Some(key) = self.translation_queue.pop_front() {
                 if let Some(item) = self.entries.get(&key) {
                     if item.translation.is_none() && !item.message.trim().is_empty() {
                         self.request_translation(

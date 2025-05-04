@@ -113,7 +113,7 @@ impl HMJServer {
                     }
 
                     _ = shutdown_rx.recv() => {
-                        println!("WebSocket listener shutting down");
+                        println!("  WebSocket listener shutting down");
                         break;
                     }
                 }
@@ -173,7 +173,7 @@ impl HMJServer {
         if server_runtime.is_some() {
             std::thread::spawn(move || {
                 if let Some(runtime) = server_runtime {
-                    println!("Shutting down HMJServer runtime in separate thread...");
+                    println!("  Shutting down HMJServer runtime in separate thread...");
                     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
                 }
             })
@@ -286,9 +286,6 @@ async fn handle_connection(
                                             let _ = reg_tx.send(id.clone()).await;
 
                                             println!("Client registered: {} from {}", id, addr);
-
-                                            // Send history to client
-                                            // todo!()
                                             continue;
                                         }
                                     }
@@ -322,6 +319,7 @@ async fn handle_connection(
                         }
                     }
                     _ = recv_shutdown_rx.recv() => {
+                        println!("  Shutting down WebSocket receiver process");
                         break;
                     }
                 }
@@ -350,7 +348,7 @@ async fn handle_connection(
             Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
         } => { result? }
         _ = main_shutdown_rx.recv() => {
-            println!("Connection handler shutting down: {}", addr);
+            println!("  Connection handler shutting down: {}", addr);
             // Just return OK - the tasks will exit naturally via their own shutdown receivers
         }
     }

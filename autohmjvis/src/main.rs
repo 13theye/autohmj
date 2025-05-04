@@ -208,7 +208,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     // Handle the background
     model.background.draw(&model.draw, app.time);
 
-    // Check for new client registrations
+    // Check for new client registrations and trigger history broadcast
     while let Some(client_id) = model.server.get_new_registrations() {
         // Send history to this specific client
         model
@@ -555,11 +555,11 @@ fn shutdown(model: &mut Model) {
     println!("Initiating graceful shutdown...");
 
     // 1. Signal all Tokio tasks to terminate
-    println!("Sending shutdown signal to async tasks...");
+    println!("  Sending shutdown signal to async tasks...");
     let _ = model.shutdown_tx.send(());
 
     // 2. Give WebSocket threads and async tasks time to terminate
-    println!("Waiting for connections to close...");
+    println!("  Waiting for connections to close...");
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     // 3. Take ownership of runtimes
@@ -570,21 +570,21 @@ fn shutdown(model: &mut Model) {
     if translation_runtime.is_some() {
         std::thread::spawn(move || {
             if let Some(runtime) = translation_runtime {
-                println!("Shutting down translation runtime in separate thread...");
+                println!("  Shutting down translation runtime in separate thread...");
                 runtime.shutdown_timeout(std::time::Duration::from_secs(1));
             }
-            println!("Translation runtime shutdown complete");
+            println!("  Translation runtime shutdown complete");
         })
         .join()
         .ok(); // Wait for the thread to complete
+        println!("Graceful shutdown complete");
     }
-
-    println!("Graceful shutdown complete");
 }
 
 impl Drop for Model {
     fn drop(&mut self) {
         println!("Model being dropped");
+
         shutdown(self);
 
         // Wait briefly

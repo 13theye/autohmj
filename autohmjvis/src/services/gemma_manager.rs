@@ -71,8 +71,7 @@ impl GemmaManager {
                                     "Received successful response of length {}",
                                     response.len()
                                 );
-
-                                println!("Gemma: {}", response);
+                                // Pass message to Instance
                                 let _ = tx.send(Some(response)).await;
                             }
                             Err(e) => {
@@ -86,7 +85,7 @@ impl GemmaManager {
 
                     tokio::select! {
                         _ = shutdown => {
-                            println!("Gemma task received shutdown signal");
+                            println!("  Gemma task received shutdown signal");
                         }
                         _ = task => {
                             println!("Gemma task completed normally")
@@ -101,9 +100,11 @@ impl GemmaManager {
         }
     }
 
+    // Collect Gemma responses into the queue for exposure to Main
     pub fn receive_all(&mut self) {
         for instance in self.instances.values_mut() {
             if let Ok(Some(message)) = instance.rx.try_recv() {
+                println!("{}: {}", instance.id, message);
                 let response = GemmaResponse {
                     author: instance.id.to_owned(),
                     message,
@@ -128,15 +129,15 @@ impl GemmaManager {
     }
 
     pub fn shutdown(&mut self) {
-        println!("Shutting down GemmaManager...");
+        println!("  Shutting down GemmaManager...");
 
         // Take ownership of the runtime
         if let Some(runtime) = self.runtime.take() {
             // Shut down runtime from a separate thread to avoid blocking
             std::thread::spawn(move || {
-                println!("Shutting down Gemma runtime in separate thread...");
+                println!("      Shutting down Gemma runtime in separate thread...");
                 runtime.shutdown_timeout(std::time::Duration::from_secs(1));
-                println!("Gemma runtime shutdown complete");
+                println!("      Gemma runtime shutdown complete");
             });
         }
     }
@@ -144,7 +145,7 @@ impl GemmaManager {
 
 impl Drop for GemmaManager {
     fn drop(&mut self) {
-        println!("GemmaManager being dropped");
+        println!("  GemmaManager being dropped");
         self.shutdown();
 
         // Wait briefly
@@ -210,13 +211,13 @@ async fn generate_response(
         },
     };
 
-    println!("Request to gemma: {:?}", request);
+    println!("\nRequest to gemma: {:#?}", request);
 
     let http_response = client.post(&url).json(&request).send().await?;
 
     // Log the raw response body before parsing
     let response_text = http_response.text().await?;
-    println!("Raw response: {}", response_text);
+    println!("\nRaw response: {}", response_text);
 
     let response: GemmaRawResponse = serde_json::from_str(&response_text)?;
 
