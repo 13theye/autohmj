@@ -77,6 +77,7 @@ impl HistoryManager {
     pub fn update(&mut self) {
         self.cleanup();
         self.process_translation_queue();
+        self.receive_translations();
     }
 
     // Get a reference to the most recent HistoryItem from a given author
@@ -118,7 +119,6 @@ impl HistoryManager {
     }
 
     // Checks that a translation queue item is valid and sends it off to translation API
-    // Receives any completed translations
     fn process_translation_queue(&mut self) {
         while !self.translation_queue.is_empty() {
             if let Some(key) = self.translation_queue.pop_front() {
@@ -132,14 +132,6 @@ impl HistoryManager {
                         );
                     }
                 }
-            }
-        }
-
-        // Receive translation, update history
-        while let Ok((key, translation)) = self.translation_rx.try_recv() {
-            if let Some(item) = self.entries.get_mut(&key) {
-                item.translation = translation;
-                self.needs_broadcast = true;
             }
         }
     }
@@ -179,6 +171,16 @@ impl HistoryManager {
                     }
                 }
             });
+        }
+    }
+
+    // Receive completed translations, update history
+    fn receive_translations(&mut self) {
+        while let Ok((key, translation)) = self.translation_rx.try_recv() {
+            if let Some(item) = self.entries.get_mut(&key) {
+                item.translation = translation;
+                self.needs_broadcast = true;
+            }
         }
     }
 

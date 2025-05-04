@@ -103,20 +103,30 @@ impl GemmaManager {
     // Collect Gemma responses into the queue for exposure to Main
     pub fn receive_all(&mut self) {
         for instance in self.instances.values_mut() {
-            if let Ok(Some(message)) = instance.rx.try_recv() {
-                println!("{}: {}", instance.id, message);
-                let response = GemmaResponse {
-                    author: instance.id.to_owned(),
-                    message,
-                };
-                self.responses.push_back(response);
+            match instance.rx.try_recv() {
+                Ok(Some(message)) => {
+                    println!("{}: {}", instance.id, message);
+                    self.responses.push_back(GemmaResponse {
+                        author: instance.id.to_owned(),
+                        message,
+                    });
+                }
+                Ok(None) => {
+                    println!("Received empty response from Gemma task: {}", instance.id);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Error receiving response from Gemma task: {}, {}",
+                        instance.id, e
+                    );
+                }
             }
         }
     }
 
     // Add a new Gemma Instance to the Manager
     pub fn add(&mut self, instance: GemmaInstance) {
-        self.instances.insert(instance.id.clone(), instance);
+        self.instances.insert(instance.id.to_owned(), instance);
     }
 
     // Pop the first entry in the queue of reponses
