@@ -6,7 +6,6 @@
 use nannou::{prelude::*, text::*};
 use nnpipe::*;
 use std::{collections::HashMap, fs, time::Instant};
-use tokio::sync::broadcast;
 
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig},
@@ -48,9 +47,6 @@ struct Model {
 
     // When on, displays more verbose messages in terminal
     verbose: bool,
-
-    // graceful shutdown
-    shutdown_tx: broadcast::Sender<()>,
 }
 
 fn model(app: &App) -> Model {
@@ -152,14 +148,11 @@ fn model(app: &App) -> Model {
         .left_justify()
         .build();
 
-    // Set up shutdown channel
-    let (shutdown_tx, _) = broadcast::channel(1);
-
     // Set up history manager
-    let history = HistoryManager::new(&shutdown_tx);
+    let history = HistoryManager::default();
 
     // Set up Gemma
-    let ai = GemmaManager::new(&gemma_config, &auth_config.google.api_key, &shutdown_tx);
+    let ai = GemmaManager::new(&gemma_config, &auth_config.google.api_key);
 
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
@@ -184,8 +177,6 @@ fn model(app: &App) -> Model {
         fps: Fps::default(),
 
         verbose: false,
-
-        shutdown_tx,
     }
 }
 
@@ -542,7 +533,7 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
             model.fps.start(app.time);
         }
         Key::Escape => {
-            shutdown(model);
+            //shutdown(model);
             app.quit();
         }
         _ => {}
@@ -551,43 +542,10 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
 
 // ************************ Graceful Shutdown  *************************************
 
-fn shutdown(model: &mut Model) {
-    println!("Initiating graceful shutdown...");
-
-    // 1. Signal all Tokio tasks to terminate
-    println!("  Sending shutdown signal to async tasks...");
-    let _ = model.shutdown_tx.send(());
-
-    // 2. Give WebSocket threads and async tasks time to terminate
-    println!("  Waiting for connections to close...");
-    std::thread::sleep(std::time::Duration::from_millis(200));
-
-    // 3. Take ownership of runtimes
-    // todo: add method in History to handle this.
-    let translation_runtime = model.history.translation_runtime.take();
-
-    // 4. Spawn a dedicated thread to shut them down safely
-    if translation_runtime.is_some() {
-        std::thread::spawn(move || {
-            if let Some(runtime) = translation_runtime {
-                println!("  Shutting down translation runtime in separate thread...");
-                runtime.shutdown_timeout(std::time::Duration::from_secs(1));
-            }
-            println!("  Translation runtime shutdown complete");
-        })
-        .join()
-        .ok(); // Wait for the thread to complete
-        println!("Graceful shutdown complete");
-    }
-}
-
 impl Drop for Model {
     fn drop(&mut self) {
-        println!("Model being dropped");
+        // Modules shut themselves down gracefully.
 
-        shutdown(self);
-
-        // Wait briefly
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        println!("\nShutting down AutoHMJVis...");
     }
 }

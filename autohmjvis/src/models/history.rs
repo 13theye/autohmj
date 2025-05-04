@@ -28,14 +28,16 @@ pub struct HistoryManager {
     pub translation_runtime: Option<tokio::runtime::Runtime>,
     translation_tx: mpsc::Sender<(usize, Option<String>)>,
     translation_rx: mpsc::Receiver<(usize, Option<String>)>,
-    shutdown_rx: broadcast::Receiver<()>, // Listener for shutdown signal
 
     // Flag that the history has been updated and needs to be broadcast to clients
     pub needs_broadcast: bool,
+
+    // Shutdown signal
+    shutdown_tx: broadcast::Sender<()>, // Sender for shutdown signal
 }
 
-impl HistoryManager {
-    pub fn new(shutdown: &broadcast::Sender<()>) -> Self {
+impl Default for HistoryManager {
+    fn default() -> Self {
         // Set up translation send/receive
         let (translation_tx, translation_rx) = mpsc::channel::<(usize, Option<String>)>(16);
 
@@ -44,7 +46,7 @@ impl HistoryManager {
             tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime for translation");
 
         // Set up shutdown listener
-        let shutdown_rx = shutdown.subscribe();
+        let (shutdown_tx, _) = broadcast::channel(1);
 
         Self {
             entries: History::default(),
@@ -54,15 +56,18 @@ impl HistoryManager {
             translation_queue: VecDeque::new(),
             translation_type: TranslationType::ToEnglish,
             translation_runtime: Some(translation_runtime),
-            shutdown_rx,
 
             translation_tx,
             translation_rx,
 
             needs_broadcast: false,
+
+            shutdown_tx,
         }
     }
+}
 
+impl HistoryManager {
     // Create and return a HistoryItem
     pub fn new_item(author: &str, message: &str) -> HistoryItem {
         HistoryItem::new(author, message)
@@ -149,11 +154,11 @@ impl HistoryManager {
     ) {
         if let Some(runtime) = &self.translation_runtime {
             let tx = self.translation_tx.clone();
-            let mut rx = self.shutdown_rx.resubscribe();
+            let mut shutdown_rx = self.shutdown_tx.subscribe();
             runtime.spawn(async move {
                 // Spawn shutdown future
                 let shutdown = async {
-                    let _ = rx.recv().await;
+                    let _ = shutdown_rx.recv().await;
                 };
 
                 let task = async {
@@ -167,7 +172,7 @@ impl HistoryManager {
 
                 tokio::select! {
                     _ = shutdown => {
-                        println!("Translation task received shutdown signal");
+                        println!("--- Translation task received shutdown signal");
                     }
                     _ = task => {
                         println!("Translation task completed normally")
@@ -189,5 +194,35 @@ impl HistoryManager {
                 String::new()
             }
         }
+    }
+
+    /**************************** Shutdown **************************************/
+
+    pub fn shutdown(&mut self) {
+        println!("...Shutting down HistoryManager...");
+
+        // Signal all tasks to terminate
+        let _ = self.shutdown_tx.send(());
+
+        // Take ownership of the runtime
+        if let Some(runtime) = self.translation_runtime.take() {
+            // Shut down runtime from a separate thread to avoid blocking
+            std::thread::spawn(move || {
+                println!(".....Shutting down Translation runtime in separate thread...");
+                runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+            })
+            .join()
+            .ok();
+            println!(".....Translation runtime shutdown successfully");
+        }
+    }
+}
+
+impl Drop for HistoryManager {
+    fn drop(&mut self) {
+        println!("...HistoryManager being dropped");
+        self.shutdown();
+        // Wait briefly
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 }

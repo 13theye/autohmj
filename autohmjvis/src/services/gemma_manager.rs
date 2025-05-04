@@ -24,14 +24,14 @@ pub struct GemmaManager {
     api_key: String,
 
     // Shutdown channel
-    shutdown_rx: broadcast::Receiver<()>,
+    shutdown_tx: broadcast::Sender<()>,
 }
 
 impl GemmaManager {
-    pub fn new(config: &GemmaConfig, api_key: &str, shutdown: &broadcast::Sender<()>) -> Self {
+    pub fn new(config: &GemmaConfig, api_key: &str) -> Self {
         let runtime =
             tokio::runtime::Runtime::new().expect("Failed to start Tokio runtime for GemmaManager");
-        let shutdown_rx = shutdown.subscribe();
+        let (shutdown_tx, _) = broadcast::channel(1);
         let instances = make_personas_from_config(config);
 
         Self {
@@ -40,7 +40,7 @@ impl GemmaManager {
             responses: VecDeque::new(),
             client: Client::new(),
             api_key: api_key.to_owned(),
-            shutdown_rx,
+            shutdown_tx,
         }
     }
 
@@ -56,9 +56,9 @@ impl GemmaManager {
 
             if let Some(runtime) = &self.runtime {
                 let tx = gemma_instance.tx.clone();
-                let mut shutdown_rx = self.shutdown_rx.resubscribe();
+                let mut shutdown_rx = self.shutdown_tx.subscribe();
                 runtime.spawn(async move {
-                    println!("Inside Gemma async task");
+                    println!("Gemma async task created");
 
                     let shutdown = async {
                         let _ = shutdown_rx.recv().await;
@@ -85,7 +85,7 @@ impl GemmaManager {
 
                     tokio::select! {
                         _ = shutdown => {
-                            println!("  Gemma task received shutdown signal");
+                            println!("...Gemma task received shutdown signal");
                         }
                         _ = task => {
                             println!("Gemma task completed normally")
@@ -128,26 +128,32 @@ impl GemmaManager {
         !self.responses.is_empty()
     }
 
+    /**************************** Shutdown **************************************/
+
     pub fn shutdown(&mut self) {
-        println!("  Shutting down GemmaManager...");
+        println!("...Shutting down GemmaManager...");
+
+        // Signal all tasks to terminate
+        let _ = self.shutdown_tx.send(());
 
         // Take ownership of the runtime
         if let Some(runtime) = self.runtime.take() {
             // Shut down runtime from a separate thread to avoid blocking
             std::thread::spawn(move || {
-                println!("      Shutting down Gemma runtime in separate thread...");
+                println!(".....Shutting down Gemma runtime in separate thread...");
                 runtime.shutdown_timeout(std::time::Duration::from_secs(1));
-                println!("      Gemma runtime shutdown complete");
-            });
+            })
+            .join()
+            .ok();
+            println!(".....Gemma runtime shutdown successfully");
         }
     }
 }
 
 impl Drop for GemmaManager {
     fn drop(&mut self) {
-        println!("  GemmaManager being dropped");
+        println!("...GemmaManager being dropped");
         self.shutdown();
-
         // Wait briefly
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
