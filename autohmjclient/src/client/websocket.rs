@@ -88,6 +88,7 @@ impl HMJClient {
 impl Drop for HMJClient {
     fn drop(&mut self) {
         // Graceful shutdown
+        println!("Initiating graceful shutdown...");
         if let Some(runtime) = &self.runtime {
             let (tx, rx) = oneshot::channel();
 
@@ -104,10 +105,12 @@ impl Drop for HMJClient {
                 });
 
                 if !shutdown_success {
-                    eprintln!("Graceful WebSocket shutdown timed out, forcing termination");
+                    eprintln!(" Graceful WebSocket shutdown timed out, forcing termination");
+                } else {
+                    println!("  WebSocket shutdown complete")
                 }
             } else {
-                eprintln!("Could not send shutdown command, forcing termination");
+                eprintln!(" Could not send shutdown command, forcing termination");
             }
 
             // Always abort task to revent hanging
@@ -120,6 +123,7 @@ impl Drop for HMJClient {
 
             // Explicitly drop the runtime
             drop(self.runtime.take());
+            println!("Graceful shutdown complete")
         }
     }
 }
