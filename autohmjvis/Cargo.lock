@@ -1960,7 +1960,6 @@ dependencies = [
 [[package]]
 name = "nnpipe"
 version = "0.1.0"
-source = "git+https://github.com/13theye/nnpipe?branch=main#eb13d834d9530a8ab56c905accdb76be105a648e"
 dependencies = [
  "bytemuck",
  "nannou",

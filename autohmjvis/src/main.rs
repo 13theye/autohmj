@@ -12,7 +12,7 @@ use autohmjvis::{
     models::{HMJMessage, HistoryManager},
     server::HMJServer,
     services::{GemmaManager, TranslationType},
-    views::BackgroundManager,
+    views::{text, BackgroundManager, TextGrid},
 };
 
 const HUMAN_ID: &str = "Human";
@@ -147,7 +147,7 @@ fn model(app: &App) -> Model {
     // Set up Text display style
     let text_layout_builder = nannou::text::layout::Builder::default();
     let text_layout = text_layout_builder
-        .line_spacing(25.0)
+        .line_spacing(15.0)
         .wrap_by_word()
         .left_justify()
         .build();
@@ -237,11 +237,20 @@ fn draw_conversation(app: &App, model: &Model) {
     let height = rect.h();
 
     // Define three columns
-    let column_width = width / 2.0;
-    let left_col = Rect::from_x_y_w_h(rect.left() - column_width / 3.0, 0.0, column_width, height);
+    let column_width = width / 4.0;
+    let left_col = Rect::from_x_y_w_h(
+        rect.left() + column_width / 2.0 + 100.0,
+        0.0,
+        column_width,
+        height,
+    );
     let center_col = Rect::from_x_y_w_h(0.0, 0.0, column_width, height);
-    let right_col =
-        Rect::from_x_y_w_h(rect.right() + column_width / 3.0, 0.0, column_width, height);
+    let right_col = Rect::from_x_y_w_h(
+        rect.right() - column_width / 2.0 - 100.0,
+        0.0,
+        column_width,
+        height,
+    );
 
     // Find the most recent message from each speaker
     let latest_gemma1 = model.history.get_latest_by_author("Uri");
@@ -249,8 +258,8 @@ fn draw_conversation(app: &App, model: &Model) {
     let latest_gemma2 = model.history.get_latest_by_author("Ani");
 
     // Position for message display (upper third of each column)
-    let message_y = rect.top() - 50.0;
-    let translation_y = rect.bottom();
+    let message_y = rect.top() - 150.0;
+    let translation_y = rect.bottom() + 150.0;
 
     // Draw the most recent message from Gemma 1
     if let Some(item) = latest_gemma1 {
@@ -343,6 +352,64 @@ fn draw_conversation(app: &App, model: &Model) {
 #[allow(clippy::too_many_arguments)]
 // Helper function to draw a message with text and translation
 fn draw_message(
+    draw: &Draw,
+    text_layout: &Layout,
+    font: &Font,
+    alt_font: &Font,
+    message: String,
+    translation: String,
+    translation_type: &TranslationType,
+    x: f32,
+    y: f32,
+    translation_y: f32,
+    width: f32,
+) {
+    let cell_side = 50.0;
+    let rows = 8;
+    let cols = 8;
+    let grid_width = cell_side * cols as f32;
+
+    // Create grid for message
+    let message_grid = TextGrid::new(
+        x - grid_width / 2.0 + cell_side / 2.0, // adjust x to align with left edge
+        y,
+        cell_side, // cell width
+        cell_side, // cell height
+        rows,
+        cols,
+    );
+
+    // Create character entities for the message
+    let message_color = rgba(0.71, 0.71, 1.0, 1.0);
+    let message_entities =
+        text::create_character_entities(&message, &message_grid, message_color, 25);
+
+    // Draw each character in the message
+    for entity in &message_entities {
+        text::draw_character(draw, entity, font);
+    }
+
+    // Draw translation if available
+    if !translation.is_empty() {
+        let translation_font = if translation_type == &TranslationType::ToKorean {
+            font
+        } else {
+            alt_font
+        };
+
+        draw.text(&translation)
+            .layout(text_layout)
+            .width(width)
+            .font(translation_font.clone())
+            .x_y(x + cell_side / 2.0, translation_y)
+            .color(rgba(0.7, 0.7, 0.4, 1.0))
+            .font_size(20);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+// Helper function to draw a message with text and translation
+fn draw_message_old(
     draw: &Draw,
     text_layout: &Layout,
     font: &Font,
@@ -510,6 +577,16 @@ fn draw_debug(app: &App, model: &Model) {
         .points(pt2(0.0, 0.0), pt2(0.0, 50.0))
         .color(BLUE)
         .stroke_weight(1.0);
+
+    // Draw rect bounds
+    model
+        .draw
+        .rect()
+        .xy(pt2(0.0, 0.0))
+        .wh(pt2(rect.0, rect.1))
+        .stroke(rgba(0.5, 1.0, 0.5, 0.5)) // Green outline
+        .stroke_weight(2.0)
+        .no_fill();
 
     // Visualize FPS (Optional)
     draw.text(&format!(
