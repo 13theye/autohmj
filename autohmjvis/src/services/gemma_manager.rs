@@ -17,9 +17,14 @@ use crate::{
 };
 
 pub struct GemmaManager {
-    runtime: Option<tokio::runtime::Runtime>,
     pub instances: HashMap<GemmaPersona, GemmaInstance>, //<id, GemmaInstance>
     responses: VecDeque<GemmaResponse>,                  // collected responses from Gemma API
+
+    // System prompt
+    system_prompt: String,
+
+    // Tokio runtime
+    runtime: Option<tokio::runtime::Runtime>,
 
     // Reqwest client
     client: Client,
@@ -33,15 +38,17 @@ pub struct GemmaManager {
 
 impl GemmaManager {
     pub fn new(config: &GemmaConfig, api_key: &str) -> Self {
+        let system_prompt = config.system.prompt.to_owned();
         let runtime =
             tokio::runtime::Runtime::new().expect("Failed to start Tokio runtime for GemmaManager");
         let (shutdown_tx, _) = broadcast::channel(1);
         let instances = make_personas_from_config(config);
 
         Self {
-            runtime: Some(runtime),
             instances,
             responses: VecDeque::new(),
+            system_prompt,
+            runtime: Some(runtime),
             client: Client::new(),
             api_key: api_key.to_owned(),
             shutdown_tx,
@@ -58,7 +65,7 @@ impl GemmaManager {
         let model = gemma_instance.model.clone();
 
         // Generate API request content
-        let contents = gemma_instance.generate_contents(new_item, history);
+        let contents = gemma_instance.generate_contents(new_item, history, &self.system_prompt);
 
         if let Some(runtime) = &self.runtime {
             let tx = gemma_instance.tx.clone();
@@ -283,17 +290,22 @@ impl GemmaInstance {
         &self.personality.prompt
     }
 
+    fn build_prompt(&self, system_prompt: &str) -> String {
+        system_prompt.to_owned() + " Personality: " + self.personality()
+    }
+
     // generate request content to be sent to this instance
     pub fn generate_contents(
         &self,
         new_item: &HistoryItem,
         history: &History,
+        system_prompt: &str,
     ) -> Vec<RequestContent> {
         // attach prompt to the message content
         let mut contents = vec![RequestContent {
             role: "user".to_string(),
             parts: vec![Part {
-                text: self.personality().to_owned(),
+                text: self.build_prompt(system_prompt),
             }],
         }];
 
@@ -307,11 +319,11 @@ impl GemmaInstance {
             };
 
             // Prepend human or ai if role is user so AI can differentiate User messages
-            let mut text = String::new();
-            if role == "user" {
-                let prepend = format!("{}: ", item.author);
-                text = prepend + &item.message;
-            }
+            let text = if role == "user" {
+                format!("{}: {}", item.author, item.message)
+            } else {
+                item.message.to_owned()
+            };
 
             // attach message body
             contents.push(RequestContent {
