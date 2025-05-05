@@ -232,21 +232,28 @@ fn view(_app: &App, model: &Model, frame: Frame) {
 // ****************************** View functions ***********************************
 
 fn draw_conversation(app: &App, model: &Model) {
+    // Get window size
     let rect = app.main_window().rect();
     let width = rect.w();
     let height = rect.h();
 
+    // Define Margins
+    let top_margin = 150.0;
+    let bottom_margin = 150.0;
+    let left_right_margin = 100.0;
+    let col_width_factor = 0.95;
+
     // Define three columns
     let column_width = width / 4.0;
     let left_col = Rect::from_x_y_w_h(
-        rect.left() + column_width / 2.0 + 100.0,
+        rect.left() + column_width / 2.0 + left_right_margin,
         0.0,
         column_width,
         height,
     );
     let center_col = Rect::from_x_y_w_h(0.0, 0.0, column_width, height);
     let right_col = Rect::from_x_y_w_h(
-        rect.right() - column_width / 2.0 - 100.0,
+        rect.right() - column_width / 2.0 - left_right_margin,
         0.0,
         column_width,
         height,
@@ -258,8 +265,8 @@ fn draw_conversation(app: &App, model: &Model) {
     let latest_gemma2 = model.history.get_latest_by_author("Ani");
 
     // Position for message display (upper third of each column)
-    let message_y = rect.top() - 150.0;
-    let translation_y = rect.bottom() + 150.0;
+    let message_y = rect.top() - top_margin;
+    let translation_y = rect.bottom() + bottom_margin;
 
     // Draw the most recent message from Gemma 1
     if let Some(item) = latest_gemma1 {
@@ -269,7 +276,7 @@ fn draw_conversation(app: &App, model: &Model) {
             None => String::new(),
         };
 
-        draw_message(
+        draw_message_as_grid(
             &model.draw,
             &model.text_layout,
             &model.korean_font,
@@ -280,7 +287,7 @@ fn draw_conversation(app: &App, model: &Model) {
             left_col.x(),
             message_y,
             translation_y,
-            column_width * 0.95, // width constraint
+            column_width * col_width_factor,
         );
     }
 
@@ -292,7 +299,7 @@ fn draw_conversation(app: &App, model: &Model) {
             None => String::new(),
         };
 
-        draw_message(
+        draw_message_as_grid(
             &model.draw,
             &model.text_layout,
             &model.korean_font,
@@ -303,7 +310,7 @@ fn draw_conversation(app: &App, model: &Model) {
             right_col.x(),
             message_y,
             translation_y,
-            column_width * 0.95, // width constraint
+            column_width * col_width_factor,
         );
     }
 
@@ -316,7 +323,7 @@ fn draw_conversation(app: &App, model: &Model) {
                 None => String::new(),
             };
 
-            draw_message(
+            draw_message_as_grid(
                 &model.draw,
                 &model.text_layout,
                 &model.korean_font,
@@ -333,7 +340,7 @@ fn draw_conversation(app: &App, model: &Model) {
     } else if let Some(human_msg) = model.connections.get(HUMAN_ID) {
         let message_text = human_msg.trim();
         let translation_text = String::new();
-        draw_message(
+        draw_message_as_grid(
             &model.draw,
             &model.text_layout,
             &model.korean_font,
@@ -351,7 +358,7 @@ fn draw_conversation(app: &App, model: &Model) {
 
 #[allow(clippy::too_many_arguments)]
 // Helper function to draw a message with text and translation
-fn draw_message(
+fn draw_message_as_grid(
     draw: &Draw,
     text_layout: &Layout,
     font: &Font,
@@ -409,7 +416,7 @@ fn draw_message(
 
 #[allow(clippy::too_many_arguments)]
 // Helper function to draw a message with text and translation
-fn draw_message_old(
+fn _draw_message(
     draw: &Draw,
     text_layout: &Layout,
     font: &Font,
@@ -429,7 +436,7 @@ fn draw_message_old(
         .font(font.clone())
         .x_y(x, y)
         .color(rgba(0.71, 0.71, 1.0, 1.0))
-        .font_size(50);
+        .font_size(25);
 
     // Draw translation if available
     if !translation.is_empty() {
@@ -445,7 +452,7 @@ fn draw_message_old(
             .font(translation_font.clone())
             .x_y(x, translation_y)
             .color(rgba(0.7, 0.7, 0.4, 1.0))
-            .font_size(40);
+            .font_size(20);
     }
 }
 
