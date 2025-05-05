@@ -28,6 +28,7 @@ pub struct AuthConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct GemmaConfig {
+    pub system: SystemPromptConfig,
     pub persona_1: PersonaConfig,
     pub persona_2: PersonaConfig,
 }

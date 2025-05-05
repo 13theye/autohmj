@@ -52,6 +52,11 @@ pub struct GoogleConfig {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SystemPromptConfig {
+    pub prompt: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct PersonaConfig {
     pub id: String,
     pub model: String,
