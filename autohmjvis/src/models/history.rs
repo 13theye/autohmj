@@ -81,7 +81,7 @@ impl HistoryManager {
     }
 
     // Get a reference to the most recent HistoryItem from a given author
-    pub fn get_latest(&self, author: &str) -> Option<&HistoryItem> {
+    pub fn get_latest_by_author(&self, author: &str) -> Option<&HistoryItem> {
         self.entries
             .iter()
             .rev()

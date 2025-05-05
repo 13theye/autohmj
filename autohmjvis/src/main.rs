@@ -61,7 +61,13 @@ fn model(app: &App) -> Model {
     let mut server = HMJServer::new(config.server.port);
     server.start().expect("Failed to start HMJServer");
 
-    // --- Load Font for Nannou Draw ---
+    // Set up history manager
+    let history = HistoryManager::default();
+
+    // Set up Gemma
+    let ai = GemmaManager::new(&gemma_config, &auth_config.google.api_key);
+
+    // --- Load Font for Nannou Draw (Hangul) ---
     // Assumes "assets/gulim.ttf" exists relative to the executable
     // or relative to the project root if running with `cargo run`
     let assets = app.assets_path().expect("Could not find assets directory");
@@ -71,8 +77,8 @@ fn model(app: &App) -> Model {
     let korean_font = Font::from_bytes(font_bytes)
         .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
 
-    // --- Load Font for Nannou Draw ---
-    // Assumes "assets/gulim.ttf" exists relative to the executable
+    // --- Load Font for Nannou Draw (Latin) ---
+    // Assumes "assets/avernir4.ttf" exists relative to the executable
     // or relative to the project root if running with `cargo run`
 
     let font_path = assets.join("avenir4.ttf");
@@ -97,7 +103,6 @@ fn model(app: &App) -> Model {
     // Set up render texture
     let device = main_window.device();
     let draw = nannou::Draw::new();
-
     let texture_main = wgpu::TextureBuilder::new()
         .size([
             config.rendering_main.texture_width,
@@ -117,7 +122,6 @@ fn model(app: &App) -> Model {
     // Set up rendering pipeline
     let draw_renderer = nannou::draw::RendererBuilder::new()
         .build_from_texture_descriptor(device, texture_main.descriptor());
-
     let sample_count = main_window.msaa_samples();
     let post_processing = Nnpipe::new(
         device,
@@ -126,7 +130,7 @@ fn model(app: &App) -> Model {
         config.rendering_main.texture_samples,
     );
 
-    // Create the texture reshaper.
+    // Create the texture reshaper for on-screen display
     let texture_view_main = texture_main.view().build();
     let texture_main_sample_count = texture_main.sample_count();
     let texture_main_sample_type = texture_main.sample_type();
@@ -140,19 +144,13 @@ fn model(app: &App) -> Model {
         dst_format,
     );
 
-    // Text display style
+    // Set up Text display style
     let text_layout_builder = nannou::text::layout::Builder::default();
     let text_layout = text_layout_builder
         .line_spacing(25.0)
         .wrap_by_word()
         .left_justify()
         .build();
-
-    // Set up history manager
-    let history = HistoryManager::default();
-
-    // Set up Gemma
-    let ai = GemmaManager::new(&gemma_config, &auth_config.google.api_key);
 
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
@@ -200,25 +198,22 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     model.background.draw(&model.draw, app.time);
 
     // Check for new client registrations and trigger history broadcast
-    while let Some(client_id) = model.server.get_new_registrations() {
-        // Send history to this specific client
-        model
-            .server
-            .send_to_client(&client_id, model.history.serialize());
-    }
+    update_new_clients(model);
 
     // Receive incoming datagrams and update connections
     receive_human(model);
     receive_gemmas(model);
 
+    // Process any new history items
     model.history.update();
 
+    // Broadcast history to clients
     if model.history.needs_broadcast {
         model.history.needs_broadcast = false;
         model.server.broadcast(model.history.serialize());
     }
 
-    // Update & draw
+    // Update & draw graphics
     draw_conversation(app, model);
 
     // Send to rendering engine and post processing
@@ -234,6 +229,8 @@ fn view(_app: &App, model: &Model, frame: Frame) {
         .encode_render_pass(frame.texture_view(), &mut encoder);
 }
 
+// ****************************** View functions ***********************************
+
 fn draw_conversation(app: &App, model: &Model) {
     let rect = app.main_window().rect();
     let width = rect.w();
@@ -247,9 +244,9 @@ fn draw_conversation(app: &App, model: &Model) {
         Rect::from_x_y_w_h(rect.right() + column_width / 3.0, 0.0, column_width, height);
 
     // Find the most recent message from each speaker
-    let latest_gemma1 = model.history.get_latest("Uri");
-    let latest_human = model.history.get_latest("Human");
-    let latest_gemma2 = model.history.get_latest("Ani");
+    let latest_gemma1 = model.history.get_latest_by_author("Uri");
+    let latest_human = model.history.get_latest_by_author("Human");
+    let latest_gemma2 = model.history.get_latest_by_author("Ani");
 
     // Position for message display (upper third of each column)
     let message_y = rect.top() - 50.0;
@@ -385,23 +382,15 @@ fn draw_message(
     }
 }
 
-// ******************************* Rendering and Capture *****************************
+// ****************************** Controller functions ******************************
 
-fn render_and_post(app: &App, model: &mut Model) {
-    // Get the window device and queue
-    let window = app.main_window();
-    let device = window.device();
-    let queue = window.queue();
-
-    // Process the scene with post-processing
-    let texture_view = model.texture_main.view().build();
-    model.post_processing.process(
-        device,
-        queue,
-        &texture_view,
-        &mut model.draw_renderer,
-        &model.draw,
-    );
+fn update_new_clients(model: &mut Model) {
+    while let Some(client_id) = model.server.get_new_registrations() {
+        // Send history to this specific client
+        model
+            .server
+            .send_to_client(&client_id, model.history.serialize());
+    }
 }
 
 fn receive_human(model: &mut Model) {
@@ -412,10 +401,8 @@ fn receive_human(model: &mut Model) {
             // Committed message
             let entry = HistoryManager::new_item(&id, &text);
 
-            // Temporary key until ordering is solved
-            let key = "Uri";
-
-            let _ = model.ai.send(key, &entry.message, &model.history.entries);
+            // Send to next AI speaker
+            let _ = model.ai.send(&entry, &model.history.entries);
             model.history.add(entry);
             // Clear the buffer
             model.connections.remove(&id);
@@ -436,6 +423,25 @@ fn receive_gemmas(model: &mut Model) {
         let entry = HistoryManager::new_item(&response.author, &response.message);
         model.history.add(entry);
     }
+}
+
+// *************************** Rendering and Capture *****************************
+
+fn render_and_post(app: &App, model: &mut Model) {
+    // Get the window device and queue
+    let window = app.main_window();
+    let device = window.device();
+    let queue = window.queue();
+
+    // Process the scene with post-processing
+    let texture_view = model.texture_main.view().build();
+    model.post_processing.process(
+        device,
+        queue,
+        &texture_view,
+        &mut model.draw_renderer,
+        &model.draw,
+    );
 }
 
 // ************************ FPS and debug display  *************************************

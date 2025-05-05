@@ -7,15 +7,19 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     error::Error,
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{broadcast, mpsc};
 
-use crate::{config::GemmaConfig, models::History};
+use crate::{
+    config::GemmaConfig,
+    models::{History, HistoryItem},
+};
 
 pub struct GemmaManager {
     runtime: Option<tokio::runtime::Runtime>,
-    pub instances: HashMap<String, GemmaInstance>, //<id, GemmaInstance>
-    responses: VecDeque<GemmaResponse>,            // collected responses from Gemma API
+    pub instances: HashMap<GemmaPersona, GemmaInstance>, //<id, GemmaInstance>
+    responses: VecDeque<GemmaResponse>,                  // collected responses from Gemma API
 
     // Reqwest client
     client: Client,
@@ -44,60 +48,56 @@ impl GemmaManager {
         }
     }
 
-    pub fn send(&mut self, gemma_id: &str, message: &str, history: &History) -> Result<(), String> {
-        if let Some(gemma_instance) = self.instances.get(gemma_id) {
-            // Clone the client, api key, model name
-            let client = self.client.clone();
-            let api_key = self.api_key.clone();
-            let model = gemma_instance.model.clone();
+    pub fn send(&mut self, new_item: &HistoryItem, history: &History) -> Result<(), String> {
+        // Determine who should speak next
+        let gemma_instance = self.instances.get(&self.next_instance()).unwrap();
 
-            // Generate API request content
-            let contents = gemma_instance.generate_contents(message, history);
+        // Clone the client, api key, model name
+        let client = self.client.clone();
+        let api_key = self.api_key.clone();
+        let model = gemma_instance.model.clone();
 
-            if let Some(runtime) = &self.runtime {
-                let tx = gemma_instance.tx.clone();
-                let mut shutdown_rx = self.shutdown_tx.subscribe();
-                runtime.spawn(async move {
-                    println!("Gemma async task created");
+        // Generate API request content
+        let contents = gemma_instance.generate_contents(new_item, history);
 
-                    let shutdown = async {
-                        let _ = shutdown_rx.recv().await;
-                    };
+        if let Some(runtime) = &self.runtime {
+            let tx = gemma_instance.tx.clone();
+            let mut shutdown_rx = self.shutdown_tx.subscribe();
+            runtime.spawn(async move {
+                println!("Gemma async task created");
 
-                    let task = async {
-                        match generate_response(contents, model, client, api_key).await {
-                            Ok(response) => {
-                                println!(
-                                    "Received successful response of length {}",
-                                    response.len()
-                                );
-                                // Pass message to Instance
-                                let _ = tx.send(Some(response)).await;
-                            }
-                            Err(e) => {
-                                eprintln!("Gemma API error: {}", e);
-                                if let Some(source) = e.source() {
-                                    eprintln!("Error source: {}", source);
-                                }
-                            }
+                let shutdown = async {
+                    let _ = shutdown_rx.recv().await;
+                };
+
+                let task = async {
+                    match generate_response(contents, model, client, api_key).await {
+                        Ok(response) => {
+                            println!("Received successful response of length {}", response.len());
+                            // Pass message to Instance
+                            let _ = tx.send(Some(response)).await;
                         }
-                    };
-
-                    tokio::select! {
-                        _ = shutdown => {
-                            println!("...Gemma task received shutdown signal");
-                        }
-                        _ = task => {
-                            println!("Gemma task completed normally")
+                        Err(e) => {
+                            eprintln!("Gemma API error: {}", e);
+                            if let Some(source) = e.source() {
+                                eprintln!("Error source: {}", source);
+                            }
                         }
                     }
-                });
-            }
+                };
 
-            Ok(())
-        } else {
-            Err(format!("No Gemma instance found with id: {}", gemma_id))
+                tokio::select! {
+                    _ = shutdown => {
+                        println!("...Gemma task received shutdown signal");
+                    }
+                    _ = task => {
+                        println!("Gemma task completed normally")
+                    }
+                }
+            });
         }
+
+        Ok(())
     }
 
     // Collect Gemma responses into the queue for exposure to Main
@@ -114,19 +114,14 @@ impl GemmaManager {
                 Ok(None) => {
                     println!("Received empty response from Gemma task: {}", instance.id);
                 }
-                Err(e) => {
-                    eprintln!(
-                        "Error receiving response from Gemma task: {}, {}",
-                        instance.id, e
-                    );
-                }
+                Err(_) => {} // ignore
             }
         }
     }
 
     // Add a new Gemma Instance to the Manager
-    pub fn add(&mut self, instance: GemmaInstance) {
-        self.instances.insert(instance.id.to_owned(), instance);
+    pub fn add(&mut self, persona: GemmaPersona, instance: GemmaInstance) {
+        self.instances.insert(persona, instance);
     }
 
     // Pop the first entry in the queue of reponses
@@ -136,6 +131,21 @@ impl GemmaManager {
 
     pub fn has_queued_responses(&self) -> bool {
         !self.responses.is_empty()
+    }
+
+    // A simple determination of next speaker, for now
+    fn next_instance(&self) -> GemmaPersona {
+        let time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let num = time % 2;
+        println!("Number: {}", num);
+        match num {
+            0 => GemmaPersona::Gemma1,
+            1 => GemmaPersona::Gemma2,
+            _ => GemmaPersona::Gemma1,
+        }
     }
 
     /**************************** Shutdown **************************************/
@@ -170,7 +180,7 @@ impl Drop for GemmaManager {
 }
 
 // an overly specific function to create and add two Gemmas from the config file
-pub fn make_personas_from_config(config: &GemmaConfig) -> HashMap<String, GemmaInstance> {
+pub fn make_personas_from_config(config: &GemmaConfig) -> HashMap<GemmaPersona, GemmaInstance> {
     let mut personas = HashMap::new();
 
     let gemma1 = GemmaInstance::new(
@@ -191,8 +201,8 @@ pub fn make_personas_from_config(config: &GemmaConfig) -> HashMap<String, GemmaI
 
     println!("Gemma2 ID: {:?}", gemma2.id);
 
-    personas.insert(gemma1.id.to_owned(), gemma1);
-    personas.insert(gemma2.id.to_owned(), gemma2);
+    personas.insert(GemmaPersona::Gemma1, gemma1);
+    personas.insert(GemmaPersona::Gemma2, gemma2);
 
     personas
 }
@@ -274,7 +284,11 @@ impl GemmaInstance {
     }
 
     // generate request content to be sent to this instance
-    pub fn generate_contents(&self, message: &str, history: &History) -> Vec<RequestContent> {
+    pub fn generate_contents(
+        &self,
+        new_item: &HistoryItem,
+        history: &History,
+    ) -> Vec<RequestContent> {
         // attach prompt to the message content
         let mut contents = vec![RequestContent {
             role: "user".to_string(),
@@ -292,12 +306,17 @@ impl GemmaInstance {
                 "user"
             };
 
+            // Prepend human or ai if role is user so AI can differentiate User messages
+            let mut text = String::new();
+            if role == "user" {
+                let prepend = format!("{}: ", item.author);
+                text = prepend + &item.message;
+            }
+
             // attach message body
             contents.push(RequestContent {
                 role: role.to_owned(),
-                parts: vec![Part {
-                    text: item.message.to_owned(),
-                }],
+                parts: vec![Part { text }],
             });
         }
 
@@ -305,7 +324,7 @@ impl GemmaInstance {
         contents.push(RequestContent {
             role: "user".to_owned(),
             parts: vec![Part {
-                text: message.to_owned(),
+                text: format!("{}: {}", new_item.author, new_item.message),
             }],
         });
 
@@ -323,6 +342,12 @@ pub struct Personality {
 pub struct GemmaResponse {
     pub author: String,
     pub message: String,
+}
+
+#[derive(Hash, PartialEq, Eq)]
+pub enum GemmaPersona {
+    Gemma1,
+    Gemma2,
 }
 
 /********************* API types ************************************* */
