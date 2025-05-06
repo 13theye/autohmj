@@ -111,7 +111,7 @@ impl TranslationService {
 
                 tokio::select! {
                     _ = shutdown => {
-                        println!("--- Translation task received shutdown signal");
+                        println!(".....Translation task received shutdown signal");
                     }
                     _ = task => {
                         println!("Translation task completed normally")

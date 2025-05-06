@@ -5,7 +5,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     error::Error,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -22,11 +22,11 @@ use crate::{
 #[derive(Clone, Debug)]
 pub enum GemmaEvent {
     GemmaReceived(GemmaResponse),
+    DefaultEvent,
 }
 
 pub struct GemmaService {
     pub instances: HashMap<GemmaPersona, GemmaInstance>, //<id, GemmaInstance>
-    responses: VecDeque<GemmaResponse>,                  // collected responses from Gemma API
 
     // System prompt
     system_prompt: String,
@@ -41,6 +41,7 @@ pub struct GemmaService {
     api_key: String,
 
     // Events channel
+    event_tx: broadcast::Sender<GemmaEvent>,
 
     // Shutdown channel
     shutdown_tx: broadcast::Sender<()>,
@@ -53,16 +54,21 @@ impl GemmaService {
             tokio::runtime::Runtime::new().expect("Failed to start Tokio runtime for GemmaManager");
         let (shutdown_tx, _) = broadcast::channel(1);
         let instances = make_personas_from_config(config);
+        let event_tx = events.gemma.clone();
 
         Self {
             instances,
-            responses: VecDeque::new(),
             system_prompt,
             runtime: Some(runtime),
             client: Client::new(),
             api_key: api_key.to_owned(),
+            event_tx,
             shutdown_tx,
         }
+    }
+
+    pub fn update(&mut self) {
+        self.receive_all();
     }
 
     pub fn send(
@@ -122,16 +128,16 @@ impl GemmaService {
         Ok(())
     }
 
-    // Collect Gemma responses into the queue for exposure to Main
+    // Collect Gemma responses and broadcast
     pub fn receive_all(&mut self) {
         for instance in self.instances.values_mut() {
             match instance.rx.try_recv() {
                 Ok(Some(message)) => {
                     println!("{}: {}", instance.id, message);
-                    self.responses.push_back(GemmaResponse {
+                    let _ = self.event_tx.send(GemmaEvent::GemmaReceived(GemmaResponse {
                         author: instance.id.to_owned(),
                         message,
-                    });
+                    }));
                 }
                 Ok(None) => {
                     println!("Received empty response from Gemma task: {}", instance.id);
@@ -144,15 +150,6 @@ impl GemmaService {
     // Add a new Gemma Instance to the Manager
     pub fn add(&mut self, persona: GemmaPersona, instance: GemmaInstance) {
         self.instances.insert(persona, instance);
-    }
-
-    // Pop the first entry in the queue of reponses
-    pub fn responses_pop_front(&mut self) -> Option<GemmaResponse> {
-        self.responses.pop_front()
-    }
-
-    pub fn has_queued_responses(&self) -> bool {
-        !self.responses.is_empty()
     }
 
     // A simple determination of next speaker, for now
@@ -173,7 +170,7 @@ impl GemmaService {
     /**************************** Shutdown **************************************/
 
     pub fn shutdown(&mut self) {
-        println!("...Shutting down GemmaManager...");
+        println!("...Shutting down GemmaService...");
 
         // Signal all tasks to terminate
         let _ = self.shutdown_tx.send(());
@@ -194,7 +191,7 @@ impl GemmaService {
 
 impl Drop for GemmaService {
     fn drop(&mut self) {
-        println!("...GemmaManager being dropped");
+        println!("...GemmaService being dropped");
         self.shutdown();
         // Wait briefly
         std::thread::sleep(std::time::Duration::from_millis(50));

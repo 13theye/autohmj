@@ -2,7 +2,7 @@
 //
 // Input history and translations
 
-use crate::events::{EventBus, ServerEvent, TranslationEvent};
+use crate::events::{EventBus, GemmaEvent, ServerEvent, TranslationEvent};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -30,7 +30,8 @@ pub struct ConversationService {
     // Events
     event_tx: broadcast::Sender<ConvoEvent>,
     translation_rx: broadcast::Receiver<TranslationEvent>, // subscribe to TranslationEvents
-    server_rx: broadcast::Receiver<ServerEvent>,           // subscribe to NetworkEvents
+    server_rx: broadcast::Receiver<ServerEvent>,           // subscribe to Websocket ServerEvents
+    gemma_rx: broadcast::Receiver<GemmaEvent>,             // subscribe to GemmaEvents
 }
 
 impl ConversationService {
@@ -41,6 +42,7 @@ impl ConversationService {
         // Subscribe to other events
         let event_tx = events.convo.clone();
         let server_rx = events.server.subscribe();
+        let gemma_rx = events.gemma.subscribe();
 
         Self {
             entries: Conversation::default(),
@@ -49,6 +51,7 @@ impl ConversationService {
             event_tx,
             translation_rx,
             server_rx,
+            gemma_rx,
         }
     }
 
@@ -91,11 +94,18 @@ impl ConversationService {
                 }
             }
         }
+
+        // Receive messages from Gemma
+        while let Ok(event) = self.gemma_rx.try_recv() {
+            if let GemmaEvent::GemmaReceived(response) = event {
+                self.add(Self::new_item(&response.author, &response.message));
+            }
+        }
     }
 
     /************************* Input History management *****************************/
 
-    // Create and return a HistoryItem
+    // Create and return a ConvoItem
     pub fn new_item(author: &str, message: &str) -> ConvoItem {
         ConvoItem::new(author, message)
     }

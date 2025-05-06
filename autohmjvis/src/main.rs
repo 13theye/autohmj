@@ -203,13 +203,13 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 
     // Update services
     model.translate.update();
+    model.ai.update();
     model.server.update();
 
     // Receive incoming datagrams and update connections
     receive_human(model);
-    receive_gemmas(model);
 
-    // Process any new history items
+    // Process any new conversation items
     model.convo.update();
 
     // Update & draw graphics
@@ -474,18 +474,6 @@ fn receive_human(model: &mut Model) {
             // In-progress message
             model.connections.insert(id, text);
         }
-    }
-}
-
-fn receive_gemmas(model: &mut Model) {
-    // Trigger AI Manager to collect responses
-    model.ai.receive_all();
-
-    // Turn the queued responses into HistoryItem entries
-    while model.ai.has_queued_responses() {
-        let response = model.ai.responses_pop_front().unwrap();
-        let entry = ConversationService::new_item(&response.author, &response.message);
-        model.convo.add(entry);
     }
 }
 
