@@ -1,4 +1,2 @@
-pub mod convo;
-pub use convo::{
-    Conversation, ConversationService, ConvoEvent, ConvoItem, ConvoWrapper, HMJMessage,
-};
+pub mod conversation;
+pub use conversation::{Conversation, ConversationManager, ConvoItem, ConvoWrapper, HMJMessage};

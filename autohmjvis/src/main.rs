@@ -10,9 +10,9 @@ use std::{collections::HashMap, fs, sync::Arc, time::Instant};
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig},
     events::EventBus,
-    models::{ConversationService, HMJMessage},
+    models::HMJMessage,
     server::HMJServer,
-    services::{GemmaService, TranslationService, TranslationType},
+    services::{ConversationService, GemmaService, TranslationService, TranslationType},
     views::{grid, AnimationController, BackgroundManager, TextGrid},
 };
 
@@ -466,7 +466,7 @@ fn receive_human(model: &mut Model) {
             let entry = ConversationService::new_item(&id, &text);
 
             // Send to next AI speaker
-            let _ = model.ai.send(&entry, &model.convo.entries);
+            let _ = model.ai.send(&entry, model.convo.entries());
             model.convo.add(entry);
             // Clear the buffer
             model.connections.remove(&id);

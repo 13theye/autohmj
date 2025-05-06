@@ -3,9 +3,8 @@
 // Event bus
 
 pub use crate::{
-    models::ConvoEvent,
     server::ServerEvent,
-    services::{GemmaEvent, TranslationEvent},
+    services::{ConvoEvent, GemmaEvent, TranslationEvent},
     views::AnimationEvent,
 };
 use tokio::sync::broadcast;
