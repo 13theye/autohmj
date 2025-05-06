@@ -12,7 +12,7 @@ use autohmjvis::{
     models::{HMJMessage, HistoryManager},
     server::HMJServer,
     services::{GemmaManager, TranslationType},
-    views::{text, BackgroundManager, TextGrid},
+    views::{grid, BackgroundManager, TextGrid},
 };
 
 const HUMAN_ID: &str = "Human";
@@ -389,11 +389,11 @@ fn draw_message_as_grid(
     // Create character entities for the message
     let message_color = rgba(0.71, 0.71, 1.0, 1.0);
     let message_entities =
-        text::create_character_entities(&message, &message_grid, message_color, 25);
+        grid::create_character_entities(&message, &message_grid, message_color, 25);
 
     // Draw each character in the message
     for entity in &message_entities {
-        text::draw_character(draw, entity, font);
+        grid::draw_character(draw, entity, font);
     }
 
     // Draw translation if available

@@ -4,13 +4,13 @@
 
 use nannou::{prelude::*, text::*};
 
-// Wraps style information for a character
+// Wraps display state information for a character
 pub struct CharacterEntity {
     character: char,
     position: Point2,
     color: Rgba,
     font_size: u32,
-    is_visible: bool,
+    pub is_visible: bool,
 }
 
 // Handles character positioning
