@@ -1,6 +1,6 @@
 // src/views/mod.rs
 pub mod animation;
-pub use animation::AnimationManager;
+pub use animation::AnimationController;
 
 pub mod background;
 pub use background::BackgroundManager;

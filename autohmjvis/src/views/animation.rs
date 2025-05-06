@@ -6,9 +6,10 @@ use crate::views::grid::CharacterEntity;
 use std::collections::HashMap;
 
 // Track animation state for each message
-pub struct AnimationManager {
+pub struct AnimationController {
     animations: HashMap<usize, MessageAnimation>,
     reveal_speed: f32, // Chars per second
+    variation: f32,    // Speed variation
 }
 
 struct MessageAnimation {
@@ -17,11 +18,26 @@ struct MessageAnimation {
     revealed_chars: usize,
     complete: bool,
     start_time: f32,
+    variation: f32,
 }
 
-impl AnimationManager {
+impl AnimationController {
+    pub fn new(reveal_speed: f32, variation: f32) -> Self {
+        Self {
+            animations: HashMap::new(),
+            reveal_speed,
+            variation,
+        }
+    }
+
     // Register a new message for animation
-    fn register(&mut self, message_id: usize, char_count: usize, time: f32) {
+    pub fn register(
+        &mut self,
+        message_id: usize,
+        char_count: usize,
+        start_time: f32,
+        variation: f32,
+    ) {
         self.animations.insert(
             message_id,
             MessageAnimation {
@@ -29,12 +45,13 @@ impl AnimationManager {
                 total_chars: char_count,
                 revealed_chars: 0,
                 complete: false,
-                start_time: time,
+                start_time,
+                variation,
             },
         );
     }
 
-    fn update(&mut self, time: f32) {
+    pub fn update(&mut self, time: f32) {
         for animation in self.animations.values_mut() {
             if !animation.complete {
                 // Calculate how many chars should be revealed by now
@@ -52,7 +69,7 @@ impl AnimationManager {
         }
     }
 
-    fn apply(&self, message_id: usize, entities: &mut [CharacterEntity]) {
+    pub fn apply(&self, message_id: usize, entities: &mut [CharacterEntity]) {
         if let Some(animation) = self.animations.get(&message_id) {
             for (i, entity) in entities.iter_mut().enumerate() {
                 entity.is_visible = i < animation.revealed_chars;

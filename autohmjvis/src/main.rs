@@ -12,7 +12,7 @@ use autohmjvis::{
     models::{HMJMessage, HistoryManager},
     server::HMJServer,
     services::{GemmaManager, TranslationType},
-    views::{grid, BackgroundManager, TextGrid},
+    views::{grid, AnimationController, BackgroundManager, TextGrid},
 };
 
 const HUMAN_ID: &str = "Human";
