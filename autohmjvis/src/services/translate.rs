@@ -28,7 +28,7 @@ pub struct TranslationService {
 }
 
 impl TranslationService {
-    pub fn new(channel_tx: broadcast::Sender<HistoryEvent>) -> Self {
+    pub fn new(channel_tx: &broadcast::Sender<HistoryEvent>) -> Self {
         // Set up translation send/receive
         let (translation_tx, translation_rx) = mpsc::channel::<(usize, Option<String>)>(16);
 

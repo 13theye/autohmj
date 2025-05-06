@@ -6,12 +6,14 @@
 use nannou::{prelude::*, text::*};
 use nnpipe::*;
 use std::{collections::HashMap, fs, time::Instant};
+use tokio::sync::broadcast;
 
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig},
+    events::HistoryEvent,
     models::{HMJMessage, HistoryManager},
     server::HMJServer,
-    services::{GemmaManager, TranslationType},
+    services::{GemmaManager, TranslationService, TranslationType},
     views::{grid, AnimationController, BackgroundManager, TextGrid},
 };
 
@@ -21,14 +23,20 @@ struct Model {
     background: BackgroundManager,
     text_layout: Layout,
 
-    // History and Translation
+    // History and Translation Services
     history: HistoryManager,
+    translate: TranslationService,
 
     // AI
     ai: GemmaManager,
 
+    // Fonts
     korean_font: Font,
     latin_font: Font,
+
+    // Events channels
+    history_tx: broadcast::Sender<HistoryEvent>,
+    history_rx: broadcast::Receiver<HistoryEvent>,
 
     // WebSockets for client
     server: HMJServer,
@@ -57,12 +65,18 @@ fn model(app: &App) -> Model {
     let gemma_config = GemmaConfig::load(&config.paths.gemma)
         .expect("\nAuto훈민정음: FAILED TO LOAD GEMMA.TOML\n");
 
+    // Set up Events
+    let (history_tx, history_rx) = broadcast::channel::<HistoryEvent>(32);
+
     // Initialize HMJServer
-    let mut server = HMJServer::new(config.server.port);
+    let mut server = HMJServer::new(config.server.port, &history_tx);
     server.start().expect("Failed to start HMJServer");
 
-    // Set up history manager
-    let history = HistoryManager::default();
+    // Set up history
+    let history = HistoryManager::new(&history_tx);
+
+    // Set up services
+    let translate = TranslationService::new(&history_tx);
 
     // Set up Gemma
     let ai = GemmaManager::new(&gemma_config, &auth_config.google.api_key);
@@ -157,10 +171,14 @@ fn model(app: &App) -> Model {
         text_layout,
 
         history,
+        translate,
         ai,
 
         korean_font,
         latin_font,
+
+        history_tx,
+        history_rx,
 
         draw,
         draw_renderer,
@@ -200,18 +218,16 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     // Check for new client registrations and trigger history broadcast
     update_new_clients(model);
 
+    // Update services
+    model.translate.update();
+    model.server.update();
+
     // Receive incoming datagrams and update connections
     receive_human(model);
     receive_gemmas(model);
 
     // Process any new history items
     model.history.update();
-
-    // Broadcast history to clients
-    if model.history.needs_broadcast {
-        model.history.needs_broadcast = false;
-        model.server.broadcast(model.history.serialize());
-    }
 
     // Update & draw graphics
     draw_conversation(app, model);
@@ -283,7 +299,7 @@ fn draw_conversation(app: &App, model: &Model) {
             &model.latin_font,
             message_text.to_owned(),
             translation_text,
-            &model.history.translation_type,
+            &model.translate.translation_type,
             left_col.x(),
             message_y,
             translation_y,
@@ -306,7 +322,7 @@ fn draw_conversation(app: &App, model: &Model) {
             &model.latin_font,
             message_text.to_owned(),
             translation_text,
-            &model.history.translation_type,
+            &model.translate.translation_type,
             right_col.x(),
             message_y,
             translation_y,
@@ -330,7 +346,7 @@ fn draw_conversation(app: &App, model: &Model) {
                 &model.latin_font,
                 message_text.to_owned(),
                 translation_text,
-                &model.history.translation_type,
+                &model.translate.translation_type,
                 center_col.x(),
                 message_y,
                 translation_y,
@@ -347,7 +363,7 @@ fn draw_conversation(app: &App, model: &Model) {
             &model.latin_font,
             message_text.to_owned(),
             translation_text,
-            &model.history.translation_type,
+            &model.translate.translation_type,
             center_col.x(),
             message_y,
             translation_y,
@@ -598,7 +614,7 @@ fn draw_debug(app: &App, model: &Model) {
     // Visualize FPS (Optional)
     draw.text(&format!(
         "FPS: {:.1}\nTranslation: {:?}",
-        model.fps.fps, model.history.translation_type
+        model.fps.fps, model.translate.translation_type
     ))
     .x_y(rect.0 - 150.0, rect.1 - 30.0)
     .color(RED)
@@ -610,13 +626,13 @@ fn draw_debug(app: &App, model: &Model) {
 fn key_pressed(app: &App, model: &mut Model, key: Key) {
     match key {
         Key::Key1 => {
-            model.history.translation_type = TranslationType::ToKorean;
+            model.translate.translation_type = TranslationType::ToKorean;
         }
         Key::Key2 => {
-            model.history.translation_type = TranslationType::ToEnglish;
+            model.translate.translation_type = TranslationType::ToEnglish;
         }
         Key::Key3 => {
-            model.history.translation_type = TranslationType::ToFrench;
+            model.translate.translation_type = TranslationType::ToFrench;
         }
         Key::P => {
             model.verbose = !model.verbose;

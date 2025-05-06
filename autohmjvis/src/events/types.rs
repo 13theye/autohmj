@@ -4,9 +4,10 @@
 
 use crate::models::HistoryItem;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum HistoryEvent {
     ItemAdded(usize, HistoryItem),         // key, HistoryItem
     ItemTranslated(usize, Option<String>), // key, translation
     ItemAnimationCompleted(usize),         // key
+    BroadcastHistory(String),              // Broadcast serialized history
 }
