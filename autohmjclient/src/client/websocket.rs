@@ -105,9 +105,9 @@ impl Drop for HMJClient {
                 });
 
                 if !shutdown_success {
-                    eprintln!(" Graceful WebSocket shutdown timed out, forcing termination");
+                    eprintln!("...Graceful WebSocket shutdown timed out, forcing termination");
                 } else {
-                    println!("  WebSocket shutdown complete")
+                    println!("...WebSocket shutdown complete")
                 }
             } else {
                 eprintln!(" Could not send shutdown command, forcing termination");
