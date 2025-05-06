@@ -1,6 +1,6 @@
-// src/models/convo.rs
+// src/models/conversation.rs
 //
-// Input history and translations
+// The central conversation model
 
 // Re-export Conversation Types
 pub use autohmjcommon::{Conversation, ConvoItem, ConvoWrapper, HMJMessage};

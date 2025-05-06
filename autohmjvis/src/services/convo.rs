@@ -1,4 +1,4 @@
-// src/services/conversation.rs
+// src/services/convo.rs
 //
 // Interface for ConversationManager
 
