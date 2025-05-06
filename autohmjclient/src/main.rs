@@ -10,14 +10,14 @@ use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
 use std::collections::BTreeMap;
 
 use autohmjclient::client::HMJClient;
-use autohmjcommon::{HMJMessage, History, HistoryWrapper};
+use autohmjcommon::{Conversation, ConvoWrapper, HMJMessage};
 
 // The application state for the input-only window
 struct Model {
     // input from the user
     input_text: String,
     // History of submitted lines
-    input_history: History,
+    conversation: Conversation,
     // Flag to request focus next frame
     input_focus_next_frame: bool,
     // text field id
@@ -38,7 +38,7 @@ impl Model {
 
         Self {
             input_text: String::new(),
-            input_history: BTreeMap::new(),
+            conversation: BTreeMap::new(),
             input_focus_next_frame: true,
             input_id: egui::Id::new("input_field"),
 
@@ -94,7 +94,7 @@ impl Model {
                             self.input_focus_next_frame = true;
                         }
 
-                        // push entry into history
+                        // push entry into conversation
                         if response.lost_focus()
                             && !self.input_text.is_empty()
                             && ctx.input(|i| i.key_pressed(egui::Key::Enter))
@@ -119,9 +119,9 @@ impl Model {
             });
     }
 
-    fn build_history_frame(&mut self, ctx: &egui::Context) {
+    fn build_conversation_frame(&mut self, ctx: &egui::Context) {
         // Define UI Style
-        let history_frame = egui::Frame {
+        let convo_frame = egui::Frame {
             fill: egui::Color32::BLACK,
             inner_margin: egui::Margin {
                 left: 10,
@@ -134,28 +134,28 @@ impl Model {
 
         // build UI
         egui::CentralPanel::default()
-            .frame(history_frame)
+            .frame(convo_frame)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .stick_to_bottom(true)
-                    .id_salt("history_scroll")
+                    .id_salt("conversation_scroll")
                     .show(ui, |ui| {
                         // clickable for focus
-                        let history_bg_rect = ui.available_rect_before_wrap();
-                        let history_response = ui.interact(
-                            history_bg_rect,
-                            ui.id().with("history_frame_bg"),
+                        let convo_bg_rect = ui.available_rect_before_wrap();
+                        let convo = ui.interact(
+                            convo_bg_rect,
+                            ui.id().with("convo_frame_bg"),
                             egui::Sense::click(),
                         );
 
-                        if history_response.clicked() {
+                        if convo.clicked() {
                             // Set the flag to request focus for input field.
                             self.input_focus_next_frame = true;
                         }
 
-                        // Display each entry in history
-                        for entry in self.input_history.values() {
+                        // Display each entry in convo
+                        for entry in self.conversation.values() {
                             // First add the author name
                             let author_text = if entry.author == self.client_id {
                                 "You:".to_string()
@@ -208,10 +208,13 @@ impl eframe::App for Model {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Process incoming messages from server
         while let Some(msg) = self.client.try_recv() {
-            match serde_json::from_str::<HistoryWrapper>(&msg) {
-                Ok(HistoryWrapper(full_history)) => {
-                    println!("Received history update with {} items", full_history.len());
-                    self.input_history = full_history;
+            match serde_json::from_str::<ConvoWrapper>(&msg) {
+                Ok(ConvoWrapper(conversation)) => {
+                    println!(
+                        "Received conversation update with {} items",
+                        conversation.len()
+                    );
+                    self.conversation = conversation;
                 }
                 Err(e) => {
                     eprintln!("Error parsing response from server: {}", e);
@@ -221,7 +224,7 @@ impl eframe::App for Model {
 
         // Display the major UI elements
         self.build_input_frame(ctx);
-        self.build_history_frame(ctx);
+        self.build_conversation_frame(ctx);
 
         // After the UI is built, stream the current text live:
         let payload = HMJMessage(self.client_id.to_owned(), self.input_text.to_owned());
