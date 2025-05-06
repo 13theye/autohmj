@@ -5,10 +5,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub type History = BTreeMap<usize, HistoryItem>;
+pub type Conversation = BTreeMap<usize, ConvoItem>; // <key, HistoryItem>
 
 #[derive(Deserialize, Serialize)]
-pub struct HistoryWrapper(pub History);
+pub struct ConvoWrapper(pub Conversation);
 
 // Wrapper for HMJ Client/Server message: (client_id, message_text)
 #[derive(Deserialize, Serialize)]
@@ -28,13 +28,13 @@ impl HMJMessage {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct HistoryItem {
+pub struct ConvoItem {
     pub author: String,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub translation: Option<String>,
 }
-impl HistoryItem {
+impl ConvoItem {
     pub fn new(author: &str, message: &str) -> Self {
         Self {
             author: author.to_owned(),
