@@ -21,6 +21,12 @@ struct MessageAnimation {
     variation: f32,
 }
 
+// Event interface
+#[derive(Clone, Debug)]
+pub enum AnimationEvent {
+    ResponseReceived,
+}
+
 impl AnimationController {
     pub fn new(reveal_speed: f32, variation: f32) -> Self {
         Self {

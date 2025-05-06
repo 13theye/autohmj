@@ -5,15 +5,14 @@
 
 use nannou::{prelude::*, text::*};
 use nnpipe::*;
-use std::{collections::HashMap, fs, time::Instant};
-use tokio::sync::broadcast;
+use std::{collections::HashMap, fs, sync::Arc, time::Instant};
 
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig},
-    events::HistoryEvent,
-    models::{HMJMessage, HistoryManager},
+    events::EventBus,
+    models::{ConversationService, HMJMessage},
     server::HMJServer,
-    services::{GemmaManager, TranslationService, TranslationType},
+    services::{GemmaService, TranslationService, TranslationType},
     views::{grid, AnimationController, BackgroundManager, TextGrid},
 };
 
@@ -23,20 +22,14 @@ struct Model {
     background: BackgroundManager,
     text_layout: Layout,
 
-    // History and Translation Services
-    history: HistoryManager,
+    // Services
+    convo: ConversationService,
     translate: TranslationService,
-
-    // AI
-    ai: GemmaManager,
+    ai: GemmaService,
 
     // Fonts
     korean_font: Font,
     latin_font: Font,
-
-    // Events channels
-    history_tx: broadcast::Sender<HistoryEvent>,
-    history_rx: broadcast::Receiver<HistoryEvent>,
 
     // WebSockets for client
     server: HMJServer,
@@ -65,21 +58,17 @@ fn model(app: &App) -> Model {
     let gemma_config = GemmaConfig::load(&config.paths.gemma)
         .expect("\nAuto훈민정음: FAILED TO LOAD GEMMA.TOML\n");
 
-    // Set up Events
-    let (history_tx, history_rx) = broadcast::channel::<HistoryEvent>(32);
+    // Set up event bus
+    let events = Arc::new(EventBus::default());
 
     // Initialize HMJServer
-    let mut server = HMJServer::new(config.server.port, &history_tx);
+    let mut server = HMJServer::new(config.server.port, events.clone());
     server.start().expect("Failed to start HMJServer");
 
-    // Set up history
-    let history = HistoryManager::new(&history_tx);
-
     // Set up services
-    let translate = TranslationService::new(&history_tx);
-
-    // Set up Gemma
-    let ai = GemmaManager::new(&gemma_config, &auth_config.google.api_key);
+    let convo = ConversationService::new(events.clone());
+    let translate = TranslationService::new(events.clone());
+    let ai = GemmaService::new(&gemma_config, &auth_config.google.api_key, events.clone());
 
     // --- Load Font for Nannou Draw (Hangul) ---
     // Assumes "assets/gulim.ttf" exists relative to the executable
@@ -170,15 +159,12 @@ fn model(app: &App) -> Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         text_layout,
 
-        history,
+        convo,
         translate,
         ai,
 
         korean_font,
         latin_font,
-
-        history_tx,
-        history_rx,
 
         draw,
         draw_renderer,
@@ -215,9 +201,6 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     // Handle the background
     model.background.draw(&model.draw, app.time);
 
-    // Check for new client registrations and trigger history broadcast
-    update_new_clients(model);
-
     // Update services
     model.translate.update();
     model.server.update();
@@ -227,7 +210,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     receive_gemmas(model);
 
     // Process any new history items
-    model.history.update();
+    model.convo.update();
 
     // Update & draw graphics
     draw_conversation(app, model);
@@ -276,9 +259,9 @@ fn draw_conversation(app: &App, model: &Model) {
     );
 
     // Find the most recent message from each speaker
-    let latest_gemma1 = model.history.get_latest_by_author("Uri");
-    let latest_human = model.history.get_latest_by_author("Human");
-    let latest_gemma2 = model.history.get_latest_by_author("Ani");
+    let latest_gemma1 = model.convo.get_latest_by_author("Uri");
+    let latest_human = model.convo.get_latest_by_author("Human");
+    let latest_gemma2 = model.convo.get_latest_by_author("Ani");
 
     // Position for message display (upper third of each column)
     let message_y = rect.top() - top_margin;
@@ -330,7 +313,7 @@ fn draw_conversation(app: &App, model: &Model) {
         );
     }
 
-    // Draw human's current input OR history item if no input is in progress
+    // Draw human's current input OR convo item if no input is in progress
     if model.connections.is_empty() || model.connections.values().all(|msg| msg.is_empty()) {
         if let Some(item) = latest_human {
             let message_text = item.message.trim();
@@ -474,26 +457,17 @@ fn _draw_message(
 
 // ****************************** Controller functions ******************************
 
-fn update_new_clients(model: &mut Model) {
-    while let Some(client_id) = model.server.get_new_registrations() {
-        // Send history to this specific client
-        model
-            .server
-            .send_to_client(&client_id, model.history.serialize());
-    }
-}
-
 fn receive_human(model: &mut Model) {
     // Receive WebSocket messages
     while let Some(HMJMessage(id, text)) = model.server.try_recv() {
         // Update connections map for live display or finalize messages
         if text.ends_with('\n') {
             // Committed message
-            let entry = HistoryManager::new_item(&id, &text);
+            let entry = ConversationService::new_item(&id, &text);
 
             // Send to next AI speaker
-            let _ = model.ai.send(&entry, &model.history.entries);
-            model.history.add(entry);
+            let _ = model.ai.send(&entry, &model.convo.entries);
+            model.convo.add(entry);
             // Clear the buffer
             model.connections.remove(&id);
         } else {
@@ -510,8 +484,8 @@ fn receive_gemmas(model: &mut Model) {
     // Turn the queued responses into HistoryItem entries
     while model.ai.has_queued_responses() {
         let response = model.ai.responses_pop_front().unwrap();
-        let entry = HistoryManager::new_item(&response.author, &response.message);
-        model.history.add(entry);
+        let entry = ConversationService::new_item(&response.author, &response.message);
+        model.convo.add(entry);
     }
 }
 

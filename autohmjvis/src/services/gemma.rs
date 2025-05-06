@@ -7,16 +7,24 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, VecDeque},
     error::Error,
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
     config::GemmaConfig,
-    models::{History, HistoryItem},
+    events::EventBus,
+    models::{Conversation, ConvoItem},
 };
 
-pub struct GemmaManager {
+// Event interface
+#[derive(Clone, Debug)]
+pub enum GemmaEvent {
+    GemmaReceived(GemmaResponse),
+}
+
+pub struct GemmaService {
     pub instances: HashMap<GemmaPersona, GemmaInstance>, //<id, GemmaInstance>
     responses: VecDeque<GemmaResponse>,                  // collected responses from Gemma API
 
@@ -32,12 +40,14 @@ pub struct GemmaManager {
     // API common
     api_key: String,
 
+    // Events channel
+
     // Shutdown channel
     shutdown_tx: broadcast::Sender<()>,
 }
 
-impl GemmaManager {
-    pub fn new(config: &GemmaConfig, api_key: &str) -> Self {
+impl GemmaService {
+    pub fn new(config: &GemmaConfig, api_key: &str, events: Arc<EventBus>) -> Self {
         let system_prompt = config.system.prompt.to_owned();
         let runtime =
             tokio::runtime::Runtime::new().expect("Failed to start Tokio runtime for GemmaManager");
@@ -55,7 +65,11 @@ impl GemmaManager {
         }
     }
 
-    pub fn send(&mut self, new_item: &HistoryItem, history: &History) -> Result<(), String> {
+    pub fn send(
+        &mut self,
+        new_item: &ConvoItem,
+        conversation: &Conversation,
+    ) -> Result<(), String> {
         // Determine who should speak next
         let gemma_instance = self.instances.get(&self.next_instance()).unwrap();
 
@@ -65,7 +79,8 @@ impl GemmaManager {
         let model = gemma_instance.model.clone();
 
         // Generate API request content
-        let contents = gemma_instance.generate_contents(new_item, history, &self.system_prompt);
+        let contents =
+            gemma_instance.generate_contents(new_item, conversation, &self.system_prompt);
 
         if let Some(runtime) = &self.runtime {
             let tx = gemma_instance.tx.clone();
@@ -177,7 +192,7 @@ impl GemmaManager {
     }
 }
 
-impl Drop for GemmaManager {
+impl Drop for GemmaService {
     fn drop(&mut self) {
         println!("...GemmaManager being dropped");
         self.shutdown();
@@ -297,8 +312,8 @@ impl GemmaInstance {
     // generate request content to be sent to this instance
     pub fn generate_contents(
         &self,
-        new_item: &HistoryItem,
-        history: &History,
+        new_item: &ConvoItem,
+        conversation: &Conversation,
         system_prompt: &str,
     ) -> Vec<RequestContent> {
         // attach prompt to the message content
@@ -310,7 +325,7 @@ impl GemmaInstance {
         }];
 
         // Add conversation history
-        for item in history.values() {
+        for item in conversation.values() {
             // assign role according to message author
             let role = if item.author == self.id {
                 "model"
@@ -351,6 +366,7 @@ pub struct Personality {
 }
 
 // A parsed response from a Gemma persona
+#[derive(Clone, Debug)]
 pub struct GemmaResponse {
     pub author: String,
     pub message: String,

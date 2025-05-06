@@ -7,7 +7,14 @@ use deeplx::{Config, DeepLX};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::events::HistoryEvent;
+use crate::events::{ConvoEvent, EventBus};
+
+// Event interface
+#[derive(Clone, Debug)]
+pub enum TranslationEvent {
+    ItemTranslated(usize, Option<String>), // key, translation
+    DefaultEvent,
+}
 
 // Controller module for translations
 pub struct TranslationService {
@@ -20,16 +27,22 @@ pub struct TranslationService {
     translation_rx: mpsc::Receiver<(usize, Option<String>)>,
 
     // Events channel
-    event_tx: broadcast::Sender<HistoryEvent>,
-    event_rx: broadcast::Receiver<HistoryEvent>,
+    event_tx: broadcast::Sender<TranslationEvent>,
+    history_rx: broadcast::Receiver<ConvoEvent>, // subscribe to HistoryEvents
 
     // Shutdown signal
     shutdown_tx: broadcast::Sender<()>, // Sender for shutdown signal
 }
 
 impl TranslationService {
-    pub fn new(channel_tx: &broadcast::Sender<HistoryEvent>) -> Self {
-        // Set up translation send/receive
+    pub fn new(events: Arc<EventBus>) -> Self {
+        // Set up eventbus send
+        let event_tx = events.translation.clone();
+
+        // Subscribe to other events
+        let history_rx = events.convo.subscribe();
+
+        // Set up async channel
         let (translation_tx, translation_rx) = mpsc::channel::<(usize, Option<String>)>(16);
 
         // Set up tokio translation runtime
@@ -45,8 +58,8 @@ impl TranslationService {
             runtime: Some(translation_runtime),
             translation_tx,
             translation_rx,
-            event_tx: channel_tx.clone(),
-            event_rx: channel_tx.subscribe(),
+            event_tx,
+            history_rx,
             shutdown_tx,
         }
     }
@@ -57,8 +70,8 @@ impl TranslationService {
     }
 
     fn process_events(&mut self) {
-        while let Ok(event) = self.event_rx.try_recv() {
-            if let HistoryEvent::ItemAdded(key, item) = event {
+        while let Ok(event) = self.history_rx.try_recv() {
+            if let ConvoEvent::ItemAdded(key, item) = event {
                 if item.translation.is_none() && !item.message.trim().is_empty() {
                     self.request_translation(
                         key,
@@ -108,12 +121,12 @@ impl TranslationService {
         }
     }
 
-    // Receive completed translations, update history
+    // Receive completed translations, update convo
     fn receive_translations(&mut self) {
         while let Ok((key, translation)) = self.translation_rx.try_recv() {
             let _ = self
                 .event_tx
-                .send(HistoryEvent::ItemTranslated(key, translation));
+                .send(TranslationEvent::ItemTranslated(key, translation));
         }
     }
 

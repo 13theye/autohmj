@@ -1,2 +1,4 @@
-pub mod history;
-pub use history::{HMJMessage, History, HistoryItem, HistoryManager, HistoryWrapper};
+pub mod convo;
+pub use convo::{
+    Conversation, ConversationService, ConvoEvent, ConvoItem, ConvoWrapper, HMJMessage,
+};
