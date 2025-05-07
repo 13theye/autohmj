@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub type Conversation = BTreeMap<usize, ConvoItem>; // <key, HistoryItem>
+pub type Conversation = BTreeMap<usize, ConvoItem>; // <key, ConvoItem>
 
 #[derive(Deserialize, Serialize)]
 pub struct ConvoWrapper(pub Conversation);
@@ -27,7 +27,7 @@ impl HMJMessage {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ConvoItem {
     pub author: String,
     pub message: String,
