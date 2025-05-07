@@ -35,7 +35,7 @@ pub struct TranslationService {
 }
 
 impl TranslationService {
-    pub fn new(events: Arc<EventBus>) -> Self {
+    pub fn new(events: &EventBus) -> Self {
         // Set up eventbus send
         let event_tx = events.translation.clone();
 
@@ -128,6 +128,17 @@ impl TranslationService {
                 .event_tx
                 .send(TranslationEvent::ItemTranslated(key, translation));
         }
+    }
+
+    // Set translation types
+    pub fn set_to_english(&mut self) {
+        self.translation_type = TranslationType::ToEnglish;
+    }
+    pub fn set_to_french(&mut self) {
+        self.translation_type = TranslationType::ToFrench;
+    }
+    pub fn set_to_korean(&mut self) {
+        self.translation_type = TranslationType::ToKorean;
     }
 
     fn shutdown(&mut self) {

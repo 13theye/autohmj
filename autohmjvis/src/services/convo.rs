@@ -5,7 +5,10 @@
 use crate::models::{Conversation, ConversationManager, ConvoItem};
 
 use crate::events::{EventBus, GemmaEvent, ServerEvent, TranslationEvent};
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 use tokio::sync::broadcast;
 
 // Events interface
@@ -27,7 +30,7 @@ pub struct ConversationService {
 }
 
 impl ConversationService {
-    pub fn new(events: Arc<EventBus>) -> Self {
+    pub fn new(events: &EventBus) -> Self {
         // Set up eventbus send
         let translation_rx = events.translation.subscribe();
 
@@ -36,9 +39,11 @@ impl ConversationService {
         let server_rx = events.server.subscribe();
         let gemma_rx = events.gemma.subscribe();
 
-        Self {
-            conversation: ConversationManager::default(),
+        // Initialize ConversationManager
+        let conversation = ConversationManager::default();
 
+        Self {
+            conversation,
             event_tx,
             translation_rx,
             server_rx,
@@ -56,10 +61,22 @@ impl ConversationService {
         // Receive messages from TranslationService
         while let Ok(event) = self.translation_rx.try_recv() {
             if let TranslationEvent::ItemTranslated(key, translation) = event {
-                self.conversation.add_translation(key, translation);
+                // Add translation to conversation
+                self.add_translation(key, translation);
+
+                // Broadcast Conversation
                 let _ = self.event_tx.send(ConvoEvent::BroadcastConvoCommand(
                     self.conversation.serialize(),
                 ));
+            }
+        }
+
+        // Receive messages from Gemma
+        while let Ok(event) = self.gemma_rx.try_recv() {
+            if let GemmaEvent::GemmaReceived(response) = event {
+                // Add conversation item & notify subscribers
+                let item = Self::new_item(&response.author, &response.message);
+                self.add(item);
             }
         }
 
@@ -82,13 +99,6 @@ impl ConversationService {
                 }
             }
         }
-
-        // Receive messages from Gemma
-        while let Ok(event) = self.gemma_rx.try_recv() {
-            if let GemmaEvent::GemmaReceived(response) = event {
-                self.add(Self::new_item(&response.author, &response.message));
-            }
-        }
     }
 
     // Add a new ConvoItem to the Conversation
@@ -100,6 +110,10 @@ impl ConversationService {
         let _ = self.event_tx.send(ConvoEvent::BroadcastConvoCommand(
             self.conversation.serialize(),
         ));
+    }
+
+    fn add_translation(&mut self, key: usize, translation: Option<String>) {
+        self.conversation.add_translation(key, translation);
     }
 
     // Get a reference to the Entries of a conversation

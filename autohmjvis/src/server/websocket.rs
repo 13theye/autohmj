@@ -53,7 +53,7 @@ pub struct HMJServer {
 }
 
 impl HMJServer {
-    pub fn new(port: u32, events: Arc<EventBus>) -> Self {
+    pub fn new(port: u32, events: &EventBus) -> Self {
         // Create comms channels
         let (message_tx, message_rx) = mpsc::channel(16);
         let (broadcast_tx, _) = broadcast::channel(16);

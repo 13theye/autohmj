@@ -3,8 +3,20 @@
 // Text styler
 
 use nannou::{prelude::*, text::*};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
+use tokio::sync::broadcast;
+
+use crate::{
+    events::EventBus,
+    models::ConvoItem,
+    services::{ConvoEvent, TranslationEvent, TranslationType},
+};
 
 // Wraps display state information for a character
+#[derive(Debug)]
 pub struct CharacterEntity {
     character: char,
     position: Point2,
@@ -15,86 +27,259 @@ pub struct CharacterEntity {
 
 // Handles character positioning
 pub struct TextGrid {
+    id: String,                                        // author
+    is_human: bool,                                    // is this grid for a human?
+    connections: Arc<RwLock<HashMap<String, String>>>, // reference to model.connections
+    latest: Option<(usize, ConvoItem)>,                // the latest (key, message)
+    content_chars: Vec<CharacterEntity>,               // the latest message broken up into chars
+
+    // attributes
     origin_x: f32,
-    origin_y: f32,
+    message_y: f32,
     cell_width: f32,
     cell_height: f32,
     rows: usize,
     cols: usize,
+    col_width: f32,
+    translation_y: f32,
+
+    // color
+    base_color: Rgba,
+    font_size: u32,
+
+    // event
+    convo_rx: broadcast::Receiver<ConvoEvent>,
+    translation_rx: broadcast::Receiver<TranslationEvent>,
 }
 
+#[allow(clippy::too_many_arguments)]
 impl TextGrid {
     pub fn new(
+        id: &str,
+        is_human: bool,
         origin_x: f32,
-        origin_y: f32,
+        message_y: f32,
         cell_width: f32,
         cell_height: f32,
         rows: usize,
         cols: usize,
+        col_width: f32,
+        translation_y: f32,
+        events: &EventBus,
+        connections: Arc<RwLock<HashMap<String, String>>>,
     ) -> Self {
+        let base_color = rgba(0.71, 0.71, 1.0, 1.0);
+        let font_size = 25;
+
+        let convo_rx = events.convo.subscribe();
+        let translation_rx = events.translation.subscribe();
+
         Self {
+            id: id.to_owned(),
+            is_human,
+            latest: None,
+            content_chars: Vec::new(),
             origin_x,
-            origin_y,
+            message_y,
             cell_width,
             cell_height,
             rows,
             cols,
+            col_width,
+            translation_y,
+            base_color,
+            font_size,
+            convo_rx,
+            translation_rx,
+            connections,
+        }
+    }
+
+    pub fn update(
+        &mut self,
+        draw: &Draw,
+        text_layout: &Layout,
+        font: &Font,
+        alt_font: &Font,
+        translation_type: &TranslationType,
+    ) {
+        self.process_events();
+        self.draw(draw, text_layout, font, alt_font, translation_type);
+    }
+
+    fn process_events(&mut self) {
+        while let Ok(event) = self.convo_rx.try_recv() {
+            // Update latest message if author is same as this grid's author
+            if let ConvoEvent::ItemAdded(new_key, new_convo_item) = event {
+                if new_convo_item.author == self.id {
+                    // Update latest message
+                    if let Some((key, _)) = &self.latest {
+                        if new_key != *key {
+                            self.content_chars =
+                                self.character_entities_from(&new_convo_item.message);
+                            self.latest = Some((new_key, new_convo_item));
+                        }
+
+                        // This is the 1st message by this author
+                    } else {
+                        self.content_chars = self.character_entities_from(&new_convo_item.message);
+                        self.latest = Some((new_key, new_convo_item));
+                    }
+                }
+            }
+        }
+
+        // Update the translation
+        while let Ok(event) = self.translation_rx.try_recv() {
+            if let TranslationEvent::ItemTranslated(key, translation) = event {
+                if let Some((latest_key, latest_entry)) = &self.latest {
+                    if key == *latest_key {
+                        let mut new_entry = latest_entry.to_owned();
+                        new_entry.translation = translation;
+                        self.latest = Some((*latest_key, new_entry));
+                    }
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw(
+        &self,
+        draw: &Draw,
+        text_layout: &Layout,
+        font: &Font,
+        alt_font: &Font,
+        translation_type: &TranslationType,
+    ) {
+        if self.draw_grid_then_continue(draw, font) {
+            self.draw_translation(
+                draw,
+                text_layout,
+                font,
+                alt_font,
+                translation_type,
+                self.translation_y,
+            );
+        }
+    }
+
+    // Draws grid text and returns true if translation should be drawn
+    fn draw_grid_then_continue(&self, draw: &Draw, font: &Font) -> bool {
+        // Render convo content if live input is blank
+        if !self.is_human
+            || (self.connections.read().unwrap().is_empty()
+                || self
+                    .connections
+                    .read()
+                    .unwrap()
+                    .values()
+                    .all(|msg| msg.is_empty()))
+        {
+            for entity in self.content_chars.iter() {
+                if entity.is_visible {
+                    self::draw_character(draw, entity, font);
+                }
+            }
+
+            return true;
+
+            // Render live content
+        } else if let Some(human_msg) = self.connections.read().unwrap().get(&self.id) {
+            let human_msg = human_msg.trim();
+            let chars = self.character_entities_from(human_msg);
+            for mut entity in chars {
+                entity.is_visible = true;
+                self::draw_character(draw, &entity, font);
+            }
+        }
+
+        false
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_translation(
+        &self,
+        draw: &Draw,
+        text_layout: &Layout,
+        font: &Font,
+        alt_font: &Font,
+        translation_type: &TranslationType,
+        translation_y: f32,
+    ) {
+        if let Some((_, latest_item)) = &self.latest {
+            if let Some(translation) = &latest_item.translation {
+                let translation_color = rgba(0.7, 0.7, 0.4, 1.0);
+                let translation_font = if translation_type == &TranslationType::ToKorean {
+                    font
+                } else {
+                    alt_font
+                };
+
+                let translation_text = format!("({})", translation.trim());
+
+                draw.text(&translation_text)
+                    .layout(text_layout)
+                    .width(self.col_width)
+                    .font(translation_font.clone())
+                    .x_y(
+                        self.origin_x + self.cell_width * self.cols as f32 / 2.0,
+                        translation_y,
+                    )
+                    .color(translation_color)
+                    .font_size(20);
+            }
         }
     }
 
     // Calculate the position of a character for a given grid coordinate
-    pub fn place_char_at(&self, row: usize, col: usize) -> Point2 {
+    fn place_char_at(&self, row: usize, col: usize) -> Point2 {
         pt2(
             self.origin_x + (col as f32 * self.cell_width),
-            self.origin_y - (row as f32 * self.cell_height),
+            self.message_y - (row as f32 * self.cell_height),
         )
     }
-}
 
-// Create character entities from a message string
-pub fn create_character_entities(
-    message: &str,
-    grid: &TextGrid,
-    base_color: Rgba,
-    font_size: u32,
-) -> Vec<CharacterEntity> {
-    let mut entities = Vec::new();
-    let mut row = 0;
-    let mut col = 0;
+    // Create character entities from a message string
+    fn character_entities_from(&self, message: &str) -> Vec<CharacterEntity> {
+        let mut entities = Vec::new();
+        let mut row = 0;
+        let mut col = 0;
 
-    for ch in message.chars() {
-        // Advance to next row on a \n
-        if ch == '\n' {
-            row += 1;
-            col = 0;
-            continue;
+        for ch in message.chars() {
+            // Advance to next row on a \n
+            if ch == '\n' {
+                row += 1;
+                col = 0;
+                continue;
+            }
+
+            // Skip spaces and punctuation
+            if ch.is_whitespace() || ch.is_ascii_punctuation() {
+                continue;
+            }
+
+            let position = self.place_char_at(row, col);
+
+            entities.push(CharacterEntity {
+                character: ch,
+                position,
+                color: self.base_color,
+                font_size: self.font_size,
+                is_visible: true,
+            });
+
+            col += 1;
+
+            // Advance to next row if a column is filled
+            if col >= self.cols {
+                row += 1;
+                col = 0;
+            }
         }
 
-        // Skip spaces and punctuation
-        if ch.is_whitespace() || ch.is_ascii_punctuation() {
-            continue;
-        }
-
-        let position = grid.place_char_at(row, col);
-
-        entities.push(CharacterEntity {
-            character: ch,
-            position,
-            color: base_color,
-            font_size,
-            is_visible: true,
-        });
-
-        col += 1;
-
-        // Advance to next row if a column is filled
-        if col >= grid.cols {
-            row += 1;
-            col = 0;
-        }
+        entities
     }
-
-    entities
 }
 
 // Draw a single character entity

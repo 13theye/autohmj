@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     error::Error,
-    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{broadcast, mpsc};
@@ -48,7 +47,7 @@ pub struct GemmaService {
 }
 
 impl GemmaService {
-    pub fn new(config: &GemmaConfig, api_key: &str, events: Arc<EventBus>) -> Self {
+    pub fn new(config: &GemmaConfig, api_key: &str, events: &EventBus) -> Self {
         let system_prompt = config.system.prompt.to_owned();
         let runtime =
             tokio::runtime::Runtime::new().expect("Failed to start Tokio runtime for GemmaManager");
@@ -159,7 +158,7 @@ impl GemmaService {
             .unwrap()
             .as_secs();
         let num = time % 2;
-        println!("Number: {}", num);
+        println!("Gemma Number: {}", num);
         match num {
             0 => GemmaPersona::Gemma1,
             1 => GemmaPersona::Gemma2,

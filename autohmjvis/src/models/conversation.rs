@@ -2,6 +2,8 @@
 //
 // The central conversation model
 
+use std::collections::HashMap;
+
 // Re-export Conversation Types
 pub use autohmjcommon::{Conversation, ConvoItem, ConvoWrapper, HMJMessage};
 
@@ -16,6 +18,7 @@ const MAX_HISTORY: usize = 100;
 pub struct ConversationManager {
     pub entries: Conversation,
     pub next_history_idx: usize,
+    pub latest_by_author: HashMap<String, usize>,
 }
 
 impl ConversationManager {
@@ -30,6 +33,7 @@ impl ConversationManager {
     pub fn add(&mut self, item: &ConvoItem) -> usize {
         let key = self.next_history_idx;
         self.entries.insert(key, item.clone());
+        self.latest_by_author.insert(item.author.to_owned(), key);
         self.next_history_idx += 1;
 
         key
@@ -43,11 +47,11 @@ impl ConversationManager {
 
     // Get a reference to the most recent HistoryItem from a given author
     pub fn get_latest_by_author(&self, author: &str) -> Option<&ConvoItem> {
-        self.entries
-            .iter()
-            .rev()
-            .map(|(_, item)| item)
-            .find(|&item| item.author == *author)
+        if let Some(key) = self.latest_by_author.get(author) {
+            self.entries.get(key)
+        } else {
+            None
+        }
     }
 
     pub fn remove(&mut self, key: &usize) {

@@ -5,15 +5,20 @@
 
 use nannou::{prelude::*, text::*};
 use nnpipe::*;
-use std::{collections::HashMap, fs, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    fs,
+    sync::{Arc, RwLock},
+    time::Instant,
+};
 
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig},
     events::EventBus,
     models::HMJMessage,
     server::HMJServer,
-    services::{ConversationService, GemmaService, TranslationService, TranslationType},
-    views::{grid, AnimationController, BackgroundManager, TextGrid},
+    services::{ConversationService, GemmaService, TranslationService},
+    views::{AnimationController, BackgroundManager, TextGrid},
 };
 
 const HUMAN_ID: &str = "Human";
@@ -27,13 +32,16 @@ struct Model {
     translate: TranslationService,
     ai: GemmaService,
 
+    // View components
+    grids: Vec<TextGrid>,
+
     // Fonts
     korean_font: Font,
     latin_font: Font,
 
     // WebSockets for client
     server: HMJServer,
-    connections: HashMap<String, String>,
+    connections: Arc<RwLock<HashMap<String, String>>>, // a shared reference to live input
 
     // Nannou API
     draw: nannou::Draw,
@@ -51,24 +59,27 @@ struct Model {
 }
 
 fn model(app: &App) -> Model {
-    // Load config
+    // Load configs
     let config = Config::load().expect("\nAuto훈민정음: FAILED TO LOAD CONFIG.TOML\n");
     let auth_config =
         AuthConfig::load(&config.paths.auth).expect("\nAuto훈민정음: FAILED TO LOAD KEY.TOML\n");
     let gemma_config = GemmaConfig::load(&config.paths.gemma)
         .expect("\nAuto훈민정음: FAILED TO LOAD GEMMA.TOML\n");
 
-    // Set up event bus
-    let events = Arc::new(EventBus::default());
+    // Initialize event bus
+    let events = EventBus::default();
 
     // Initialize HMJServer
-    let mut server = HMJServer::new(config.server.port, events.clone());
+    let mut server = HMJServer::new(config.server.port, &events);
     server.start().expect("Failed to start HMJServer");
 
-    // Set up services
-    let convo = ConversationService::new(events.clone());
-    let translate = TranslationService::new(events.clone());
-    let ai = GemmaService::new(&gemma_config, &auth_config.google.api_key, events.clone());
+    // Initialize connections
+    let connections = Arc::new(RwLock::new(HashMap::new()));
+
+    // Initialize services
+    let convo = ConversationService::new(&events);
+    let translate = TranslationService::new(&events);
+    let ai = GemmaService::new(&gemma_config, &auth_config.google.api_key, &events);
 
     // --- Load Font for Nannou Draw (Hangul) ---
     // Assumes "assets/gulim.ttf" exists relative to the executable
@@ -100,7 +111,6 @@ fn model(app: &App) -> Model {
         .key_pressed(key_pressed)
         .build()
         .unwrap();
-
     let main_window = app.window(main_window_id).unwrap();
 
     // Set up render texture
@@ -155,6 +165,9 @@ fn model(app: &App) -> Model {
         .left_justify()
         .build();
 
+    // Initialize three text grids
+    let grids = init_three_grids(app, &gemma_config, &events, connections.clone());
+
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         text_layout,
@@ -162,6 +175,8 @@ fn model(app: &App) -> Model {
         convo,
         translate,
         ai,
+
+        grids,
 
         korean_font,
         latin_font,
@@ -172,7 +187,7 @@ fn model(app: &App) -> Model {
         texture_reshaper_main,
 
         server,
-        connections: HashMap::new(),
+        connections,
 
         post_processing,
 
@@ -207,13 +222,13 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     model.server.update();
 
     // Receive incoming datagrams and update connections
-    receive_human(model);
+    receive_human_input(model);
 
     // Process any new conversation items
     model.convo.update();
 
     // Update & draw graphics
-    draw_conversation(app, model);
+    update_grids(model);
 
     // Send to rendering engine and post processing
     render_and_post(app, model);
@@ -229,16 +244,38 @@ fn view(_app: &App, model: &Model, frame: Frame) {
 }
 
 // ****************************** View functions ***********************************
+fn update_grids(model: &mut Model) {
+    for grid in model.grids.iter_mut() {
+        grid.update(
+            &model.draw,
+            &model.text_layout,
+            &model.korean_font,
+            &model.latin_font,
+            &model.translate.translation_type,
+        );
+    }
+}
 
-fn draw_conversation(app: &App, model: &Model) {
+fn init_three_grids(
+    app: &App,
+    gemma_config: &GemmaConfig,
+    events: &EventBus,
+    connections: Arc<RwLock<HashMap<String, String>>>,
+) -> Vec<TextGrid> {
     // Get window size
     let rect = app.main_window().rect();
     let width = rect.w();
     let height = rect.h();
 
-    // Define Margins
-    let top_margin = 150.0;
-    let bottom_margin = 150.0;
+    // Grid dimensions
+    let cell_side = 50.0;
+    let rows = 8;
+    let cols = 8;
+    let grid_width = cell_side * cols as f32;
+
+    // Screen Margins
+    let top_margin = 130.0;
+    let bottom_margin = 130.0;
     let left_right_margin = 100.0;
     let col_width_factor = 0.95;
 
@@ -258,221 +295,79 @@ fn draw_conversation(app: &App, model: &Model) {
         height,
     );
 
-    // Find the most recent message from each speaker
-    let latest_gemma1 = model.convo.get_latest_by_author("Uri");
-    let latest_human = model.convo.get_latest_by_author("Human");
-    let latest_gemma2 = model.convo.get_latest_by_author("Ani");
-
     // Position for message display (upper third of each column)
     let message_y = rect.top() - top_margin;
     let translation_y = rect.bottom() + bottom_margin;
 
-    // Draw the most recent message from Gemma 1
-    if let Some(item) = latest_gemma1 {
-        let message_text = item.message.trim();
-        let translation_text = match &item.translation {
-            Some(translation) => format!("({})", translation.trim()),
-            None => String::new(),
-        };
-
-        draw_message_as_grid(
-            &model.draw,
-            &model.text_layout,
-            &model.korean_font,
-            &model.latin_font,
-            message_text.to_owned(),
-            translation_text,
-            &model.translate.translation_type,
-            left_col.x(),
-            message_y,
-            translation_y,
-            column_width * col_width_factor,
-        );
-    }
-
-    // Draw the most recent message from Gemma 2
-    if let Some(item) = latest_gemma2 {
-        let message_text = item.message.trim();
-        let translation_text = match &item.translation {
-            Some(translation) => format!("({})", translation.trim()),
-            None => String::new(),
-        };
-
-        draw_message_as_grid(
-            &model.draw,
-            &model.text_layout,
-            &model.korean_font,
-            &model.latin_font,
-            message_text.to_owned(),
-            translation_text,
-            &model.translate.translation_type,
-            right_col.x(),
-            message_y,
-            translation_y,
-            column_width * col_width_factor,
-        );
-    }
-
-    // Draw human's current input OR convo item if no input is in progress
-    if model.connections.is_empty() || model.connections.values().all(|msg| msg.is_empty()) {
-        if let Some(item) = latest_human {
-            let message_text = item.message.trim();
-            let translation_text = match &item.translation {
-                Some(translation) => format!("({})", translation.trim()),
-                None => String::new(),
-            };
-
-            draw_message_as_grid(
-                &model.draw,
-                &model.text_layout,
-                &model.korean_font,
-                &model.latin_font,
-                message_text.to_owned(),
-                translation_text,
-                &model.translate.translation_type,
-                center_col.x(),
-                message_y,
-                translation_y,
-                column_width * 0.95, // width constraint
-            );
-        }
-    } else if let Some(human_msg) = model.connections.get(HUMAN_ID) {
-        let message_text = human_msg.trim();
-        let translation_text = String::new();
-        draw_message_as_grid(
-            &model.draw,
-            &model.text_layout,
-            &model.korean_font,
-            &model.latin_font,
-            message_text.to_owned(),
-            translation_text,
-            &model.translate.translation_type,
-            center_col.x(),
-            message_y,
-            translation_y,
-            column_width * 0.95, // width constraint
-        );
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-// Helper function to draw a message with text and translation
-fn draw_message_as_grid(
-    draw: &Draw,
-    text_layout: &Layout,
-    font: &Font,
-    alt_font: &Font,
-    message: String,
-    translation: String,
-    translation_type: &TranslationType,
-    x: f32,
-    y: f32,
-    translation_y: f32,
-    width: f32,
-) {
-    let cell_side = 50.0;
-    let rows = 8;
-    let cols = 8;
-    let grid_width = cell_side * cols as f32;
-
-    // Create grid for message
-    let message_grid = TextGrid::new(
-        x - grid_width / 2.0 + cell_side / 2.0, // adjust x to align with left edge
-        y,
+    let human_grid = TextGrid::new(
+        "Human",
+        true,
+        center_col.x() - grid_width / 2.0 + cell_side / 2.0, // adjust x to align with left edge
+        message_y,
         cell_side, // cell width
         cell_side, // cell height
         rows,
         cols,
+        column_width * col_width_factor,
+        translation_y,
+        events,
+        connections.clone(),
     );
 
-    // Create character entities for the message
-    let message_color = rgba(0.71, 0.71, 1.0, 1.0);
-    let message_entities =
-        grid::create_character_entities(&message, &message_grid, message_color, 25);
+    let gemma1_grid = TextGrid::new(
+        &gemma_config.persona_1.id,
+        false,
+        left_col.x() - grid_width / 2.0 + cell_side / 2.0,
+        message_y,
+        cell_side,
+        cell_side,
+        rows,
+        cols,
+        column_width * col_width_factor,
+        translation_y,
+        events,
+        connections.clone(),
+    );
 
-    // Draw each character in the message
-    for entity in &message_entities {
-        grid::draw_character(draw, entity, font);
-    }
+    let gemma2_grid = TextGrid::new(
+        &gemma_config.persona_2.id,
+        false,
+        right_col.x() - grid_width / 2.0 + cell_side / 2.0,
+        message_y,
+        cell_side,
+        cell_side,
+        rows,
+        cols,
+        column_width * col_width_factor,
+        translation_y,
+        events,
+        connections.clone(),
+    );
 
-    // Draw translation if available
-    if !translation.is_empty() {
-        let translation_font = if translation_type == &TranslationType::ToKorean {
-            font
-        } else {
-            alt_font
-        };
-
-        draw.text(&translation)
-            .layout(text_layout)
-            .width(width)
-            .font(translation_font.clone())
-            .x_y(x + cell_side / 2.0, translation_y)
-            .color(rgba(0.7, 0.7, 0.4, 1.0))
-            .font_size(20);
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-// Helper function to draw a message with text and translation
-fn _draw_message(
-    draw: &Draw,
-    text_layout: &Layout,
-    font: &Font,
-    alt_font: &Font,
-    message: String,
-    translation: String,
-    translation_type: &TranslationType,
-    x: f32,
-    y: f32,
-    translation_y: f32,
-    width: f32,
-) {
-    // Draw main message
-    draw.text(&message)
-        .layout(text_layout)
-        .width(width)
-        .font(font.clone())
-        .x_y(x, y)
-        .color(rgba(0.71, 0.71, 1.0, 1.0))
-        .font_size(25);
-
-    // Draw translation if available
-    if !translation.is_empty() {
-        let translation_font = if translation_type == &TranslationType::ToKorean {
-            font
-        } else {
-            alt_font
-        };
-
-        draw.text(&translation)
-            .layout(text_layout)
-            .width(width)
-            .font(translation_font.clone())
-            .x_y(x, translation_y)
-            .color(rgba(0.7, 0.7, 0.4, 1.0))
-            .font_size(20);
-    }
+    vec![human_grid, gemma1_grid, gemma2_grid]
 }
 
 // ****************************** Controller functions ******************************
 
-fn receive_human(model: &mut Model) {
+fn receive_human_input(model: &mut Model) {
     // Receive WebSocket messages
     while let Some(HMJMessage(id, text)) = model.server.try_recv() {
         // Update connections map for live display or finalize messages
         if text.ends_with('\n') {
-            // Committed message
+            // Create convo item
             let entry = ConversationService::new_item(&id, &text);
 
             // Send to next AI speaker
             let _ = model.ai.send(&entry, model.convo.entries());
+
+            // Add message to conversation
             model.convo.add(entry);
+
             // Clear the buffer
-            model.connections.remove(&id);
+            model.connections.write().unwrap().remove(&id);
         } else {
-            // In-progress message
-            model.connections.insert(id, text);
+            // Message is in progress
+            model.connections.write().unwrap().insert(id, text);
         }
     }
 }
@@ -578,9 +473,9 @@ fn draw_debug(app: &App, model: &Model) {
         "FPS: {:.1}\nTranslation: {:?}",
         model.fps.fps, model.translate.translation_type
     ))
-    .x_y(rect.0 - 150.0, rect.1 - 30.0)
+    .x_y(rect.0 / 2.0 - 100.0, rect.1 / 2.0 - 30.0)
     .color(RED)
-    .font_size(20);
+    .font_size(10);
 }
 
 // ************************ Main window input  *************************************
@@ -588,13 +483,13 @@ fn draw_debug(app: &App, model: &Model) {
 fn key_pressed(app: &App, model: &mut Model, key: Key) {
     match key {
         Key::Key1 => {
-            model.translate.translation_type = TranslationType::ToKorean;
+            model.translate.set_to_korean();
         }
         Key::Key2 => {
-            model.translate.translation_type = TranslationType::ToEnglish;
+            model.translate.set_to_english();
         }
         Key::Key3 => {
-            model.translate.translation_type = TranslationType::ToFrench;
+            model.translate.set_to_french();
         }
         Key::P => {
             model.verbose = !model.verbose;
