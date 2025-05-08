@@ -10,6 +10,7 @@ use std::{
 use tokio::sync::broadcast;
 
 use crate::{
+    config::GridConfig,
     events::EventBus,
     models::ConvoItem,
     services::{ConvoEvent, TranslationEvent, TranslationType},
@@ -29,47 +30,57 @@ pub struct CharacterEntity {
 pub struct TextGrid {
     id: String,                                        // author
     is_human: bool,                                    // is this grid for a human?
-    connections: Arc<RwLock<HashMap<String, String>>>, // reference to model.connections
     latest: Option<(usize, ConvoItem)>,                // the latest (key, message)
     content_chars: Vec<CharacterEntity>,               // the latest message broken up into chars
+    connections: Arc<RwLock<HashMap<String, String>>>, // reference to model.connections
+
+    // event
+    convo_rx: broadcast::Receiver<ConvoEvent>,
+    translation_rx: broadcast::Receiver<TranslationEvent>,
 
     // attributes
     origin_x: f32,
     message_y: f32,
+    translation_y: f32,
     cell_width: f32,
     cell_height: f32,
     rows: usize,
     cols: usize,
     col_width: f32,
-    translation_y: f32,
 
-    // color
+    // text style
     base_color: Rgba,
+    translation_color: Rgba,
     font_size: u32,
-
-    // event
-    convo_rx: broadcast::Receiver<ConvoEvent>,
-    translation_rx: broadcast::Receiver<TranslationEvent>,
 }
 
-#[allow(clippy::too_many_arguments)]
 impl TextGrid {
     pub fn new(
         id: &str,
         is_human: bool,
-        origin_x: f32,
-        message_y: f32,
-        cell_width: f32,
-        cell_height: f32,
-        rows: usize,
-        cols: usize,
-        col_width: f32,
-        translation_y: f32,
+        grid_config: &GridConfig,
+        window_dims: (f32, f32),
+        column: &Rect,
         events: &EventBus,
         connections: Arc<RwLock<HashMap<String, String>>>,
     ) -> Self {
+        // Calculate grid dimensions
+        let font_size = grid_config.font_size_text;
+        let cell_width = font_size as f32 * 2.0;
+        let cell_height = cell_width;
+        let rows = grid_config.rows;
+        let cols = grid_config.cols;
+        let col_width = cell_width * cols as f32 * 0.95;
+
+        // Calculate positioning
+        let window_top = window_dims.1 / 2.0;
+        let window_bottom = window_dims.1 / -2.0;
+        let message_y = window_top - grid_config.top_margin as f32;
+        let translation_y = window_bottom + grid_config.bottom_margin as f32;
+        let origin_x = column.x() - col_width / 2.0 + cell_width / 2.0;
+
         let base_color = rgba(0.71, 0.71, 1.0, 1.0);
-        let font_size = 25;
+        let translation_color = rgba(0.7, 0.7, 0.4, 1.0);
 
         let convo_rx = events.convo.subscribe();
         let translation_rx = events.translation.subscribe();
@@ -79,19 +90,22 @@ impl TextGrid {
             is_human,
             latest: None,
             content_chars: Vec::new(),
+            connections,
+
+            convo_rx,
+            translation_rx,
+
             origin_x,
             message_y,
+            translation_y,
             cell_width,
             cell_height,
             rows,
             cols,
             col_width,
-            translation_y,
             base_color,
+            translation_color,
             font_size,
-            convo_rx,
-            translation_rx,
-            connections,
         }
     }
 
@@ -209,7 +223,6 @@ impl TextGrid {
     ) {
         if let Some((_, latest_item)) = &self.latest {
             if let Some(translation) = &latest_item.translation {
-                let translation_color = rgba(0.7, 0.7, 0.4, 1.0);
                 let translation_font = if translation_type == &TranslationType::ToKorean {
                     font
                 } else {
@@ -226,7 +239,7 @@ impl TextGrid {
                         self.origin_x + self.cell_width * self.cols as f32 / 2.0,
                         translation_y,
                     )
-                    .color(translation_color)
+                    .color(self.translation_color)
                     .font_size(20);
             }
         }

@@ -13,7 +13,7 @@ use std::{
 };
 
 use autohmjvis::{
-    config::{AuthConfig, Config, GemmaConfig},
+    config::{AuthConfig, Config, GemmaConfig, GridConfig},
     events::EventBus,
     models::HMJMessage,
     server::HMJServer,
@@ -166,7 +166,13 @@ fn model(app: &App) -> Model {
         .build();
 
     // Initialize three text grids
-    let grids = init_three_grids(app, &gemma_config, &events, connections.clone());
+    let grids = init_three_grids(
+        app,
+        &config.grid,
+        &gemma_config,
+        &events,
+        connections.clone(),
+    );
 
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
@@ -258,6 +264,7 @@ fn update_grids(model: &mut Model) {
 
 fn init_three_grids(
     app: &App,
+    grid_config: &GridConfig,
     gemma_config: &GemmaConfig,
     events: &EventBus,
     connections: Arc<RwLock<HashMap<String, String>>>,
@@ -267,20 +274,9 @@ fn init_three_grids(
     let width = rect.w();
     let height = rect.h();
 
-    // Grid dimensions
-    let cell_side = 50.0;
-    let rows = 8;
-    let cols = 8;
-    let grid_width = cell_side * cols as f32;
-
-    // Screen Margins
-    let top_margin = 130.0;
-    let bottom_margin = 130.0;
-    let left_right_margin = 100.0;
-    let col_width_factor = 0.95;
-
     // Define three columns
     let column_width = width / 4.0;
+    let left_right_margin = grid_config.left_right_margin as f32;
     let left_col = Rect::from_x_y_w_h(
         rect.left() + column_width / 2.0 + left_right_margin,
         0.0,
@@ -295,21 +291,12 @@ fn init_three_grids(
         height,
     );
 
-    // Position for message display (upper third of each column)
-    let message_y = rect.top() - top_margin;
-    let translation_y = rect.bottom() + bottom_margin;
-
     let human_grid = TextGrid::new(
         "Human",
         true,
-        center_col.x() - grid_width / 2.0 + cell_side / 2.0, // adjust x to align with left edge
-        message_y,
-        cell_side, // cell width
-        cell_side, // cell height
-        rows,
-        cols,
-        column_width * col_width_factor,
-        translation_y,
+        grid_config,
+        (width, height),
+        &center_col,
         events,
         connections.clone(),
     );
@@ -317,14 +304,9 @@ fn init_three_grids(
     let gemma1_grid = TextGrid::new(
         &gemma_config.persona_1.id,
         false,
-        left_col.x() - grid_width / 2.0 + cell_side / 2.0,
-        message_y,
-        cell_side,
-        cell_side,
-        rows,
-        cols,
-        column_width * col_width_factor,
-        translation_y,
+        grid_config,
+        (width, height),
+        &left_col,
         events,
         connections.clone(),
     );
@@ -332,14 +314,9 @@ fn init_three_grids(
     let gemma2_grid = TextGrid::new(
         &gemma_config.persona_2.id,
         false,
-        right_col.x() - grid_width / 2.0 + cell_side / 2.0,
-        message_y,
-        cell_side,
-        cell_side,
-        rows,
-        cols,
-        column_width * col_width_factor,
-        translation_y,
+        grid_config,
+        (width, height),
+        &right_col,
         events,
         connections.clone(),
     );
