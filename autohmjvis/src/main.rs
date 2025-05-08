@@ -234,7 +234,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     model.convo.update();
 
     // Update & draw graphics
-    update_grids(model);
+    update_grids(app, model);
 
     // Send to rendering engine and post processing
     render_and_post(app, model);
@@ -250,9 +250,10 @@ fn view(_app: &App, model: &Model, frame: Frame) {
 }
 
 // ****************************** View functions ***********************************
-fn update_grids(model: &mut Model) {
+fn update_grids(app: &App, model: &mut Model) {
     for grid in model.grids.iter_mut() {
         grid.update(
+            app.time,
             &model.draw,
             &model.text_layout,
             &model.korean_font,

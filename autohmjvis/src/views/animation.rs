@@ -37,13 +37,7 @@ impl AnimationController {
     }
 
     // Register a new message for animation
-    pub fn register(
-        &mut self,
-        message_id: usize,
-        char_count: usize,
-        start_time: f32,
-        variation: f32,
-    ) {
+    pub fn register(&mut self, message_id: usize, char_count: usize, start_time: f32) {
         self.animations.insert(
             message_id,
             MessageAnimation {
@@ -52,7 +46,7 @@ impl AnimationController {
                 revealed_chars: 0,
                 complete: false,
                 start_time,
-                variation,
+                variation: self.variation,
             },
         );
     }
@@ -65,7 +59,7 @@ impl AnimationController {
                 let target_revealed = (elapsed * self.reveal_speed) as usize;
 
                 // Update revealed count
-                animation.revealed_chars = target_revealed.min(animation.revealed_chars);
+                animation.revealed_chars = target_revealed.max(animation.revealed_chars);
 
                 // Check if animation is complete
                 if animation.revealed_chars >= animation.total_chars {

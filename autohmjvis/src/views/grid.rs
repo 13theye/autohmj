@@ -14,6 +14,7 @@ use crate::{
     events::EventBus,
     models::ConvoItem,
     services::{ConvoEvent, TranslationEvent, TranslationType},
+    views::AnimationController,
 };
 
 // Wraps display state information for a character
@@ -33,6 +34,9 @@ pub struct TextGrid {
     latest: Option<(usize, ConvoItem)>,                // the latest (key, message)
     content_chars: Vec<CharacterEntity>,               // the latest message broken up into chars
     connections: Arc<RwLock<HashMap<String, String>>>, // reference to model.connections
+
+    // animation
+    animation: AnimationController,
 
     // event
     convo_rx: broadcast::Receiver<ConvoEvent>,
@@ -85,12 +89,17 @@ impl TextGrid {
         let convo_rx = events.convo.subscribe();
         let translation_rx = events.translation.subscribe();
 
+        // Animation
+        let animation = AnimationController::new(7.0, 1.0);
+
         Self {
             id: id.to_owned(),
             is_human,
             latest: None,
             content_chars: Vec::new(),
             connections,
+
+            animation,
 
             convo_rx,
             translation_rx,
@@ -111,17 +120,26 @@ impl TextGrid {
 
     pub fn update(
         &mut self,
+        time: f32,
         draw: &Draw,
         text_layout: &Layout,
         font: &Font,
         alt_font: &Font,
         translation_type: &TranslationType,
     ) {
-        self.process_events();
+        self.process_events(time);
+        self.update_animation(time);
         self.draw(draw, text_layout, font, alt_font, translation_type);
     }
 
-    fn process_events(&mut self) {
+    fn update_animation(&mut self, time: f32) {
+        self.animation.update(time);
+        if let Some((key, _)) = self.latest {
+            self.animation.apply(key, &mut self.content_chars);
+        }
+    }
+
+    fn process_events(&mut self, time: f32) {
         while let Ok(event) = self.convo_rx.try_recv() {
             // Update latest message if author is same as this grid's author
             if let ConvoEvent::ItemAdded(new_key, new_convo_item) = event {
@@ -132,12 +150,17 @@ impl TextGrid {
                             self.content_chars =
                                 self.character_entities_from(&new_convo_item.message);
                             self.latest = Some((new_key, new_convo_item));
+                            self.animation
+                                .register(new_key, self.content_chars.len(), time);
                         }
 
                         // This is the 1st message by this author
                     } else {
                         self.content_chars = self.character_entities_from(&new_convo_item.message);
                         self.latest = Some((new_key, new_convo_item));
+
+                        self.animation
+                            .register(new_key, self.content_chars.len(), time);
                     }
                 }
             }
@@ -253,7 +276,8 @@ impl TextGrid {
         )
     }
 
-    // Create character entities from a message string
+    // Create character entities from a message string. Hides characters by default
+    // so that animations can reveal them.
     fn character_entities_from(&self, message: &str) -> Vec<CharacterEntity> {
         let mut entities = Vec::new();
         let mut row = 0;
@@ -279,7 +303,7 @@ impl TextGrid {
                 position,
                 color: self.base_color,
                 font_size: self.font_size,
-                is_visible: true,
+                is_visible: false,
             });
 
             col += 1;
