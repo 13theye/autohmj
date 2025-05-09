@@ -146,7 +146,7 @@ impl TextGrid {
             if let ConvoEvent::ItemAdded(new_key, new_convo_item) = event {
                 if new_convo_item.author == self.id {
                     // Update latest message
-                    if let Some((key, item)) = &self.latest {
+                    if let Some((key, _)) = &self.latest {
                         if new_key != *key {
                             self.content_chars =
                                 self.character_entities_from(&new_convo_item.message);

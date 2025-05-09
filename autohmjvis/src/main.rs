@@ -18,10 +18,10 @@ use autohmjvis::{
     models::HMJMessage,
     server::HMJServer,
     services::{ConversationService, GemmaService, TranslationService},
-    views::{AnimationController, BackgroundManager, TextGrid},
+    views::{BackgroundManager, TextGrid},
 };
 
-const HUMAN_ID: &str = "Human";
+//const HUMAN_ID: &str = "Human";
 
 struct Model {
     background: BackgroundManager,

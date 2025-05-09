@@ -2,13 +2,9 @@
 //
 // Interface for ConversationManager
 
+use crate::events::{EventBus, GemmaEvent, ServerEvent, TranslationEvent};
 use crate::models::{Conversation, ConversationManager, ConvoItem};
 
-use crate::events::{EventBus, GemmaEvent, ServerEvent, TranslationEvent};
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
 use tokio::sync::broadcast;
 
 // Events interface

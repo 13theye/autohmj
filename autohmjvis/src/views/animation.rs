@@ -16,12 +16,9 @@ pub struct AnimationController {
 }
 
 struct MessageAnimation {
-    message_key: usize,
     total_chars: usize,
     revealed_chars: usize,
     complete: bool,
-    start_time: f32,
-    variation: f32,
     char_progress: Vec<f32>, // track animation progress for each char (0.0-1.0)
     char_speed_factors: Vec<f32>, // speed variations at the char level
     char_start_times: Vec<Option<f32>>, // start time of character reveal; None if not revealed
@@ -83,12 +80,9 @@ impl AnimationController {
         self.animations.insert(
             message_id,
             MessageAnimation {
-                message_key: message_id,
                 total_chars: char_count,
                 revealed_chars: 1,
                 complete: false,
-                start_time,
-                variation: self.variation,
                 char_progress,
                 char_speed_factors,
                 char_start_times,
