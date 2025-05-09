@@ -2,31 +2,21 @@
 [server]
 port = 50001
 
-[rendering_main]
-texture_width = 3840
-texture_height = 1440
-
-# Please don't change these
-texture_samples = 1
-arc_resolution = 25
-
-[main_window]
-# The size of the monitoring window.
-# Currently scaling to 1/2 of texture resolution
-width = 1920
-height = 720
-
 [osc]
 # OSC listening port. UDP only.
 rx_port = 8000
 
+[speed]
+bpm = 120
 
-[frame_recorder]
-# Settings for the frame recorder
-# Frame limit of 30000 frames is about 16m40s at 30fps
-# Frame limit of 50000 frames is about 13m53s at 60fps
-frame_limit = 50000
-fps = 30
+[grid]
+font_size_text = 25
+font_size_translation = 20
+rows = 8
+cols = 8
+top_margin = 130
+bottom_margin = 130
+left_right_margin = 100
 
 [paths]
 #paths are relative to executable directory
@@ -37,5 +27,23 @@ auth = "auth"
 # directory for gemma.toml: Gemma AI config:
 gemma = "gemma"
 
-[speed]
-bpm = 120
+[rendering_main]
+texture_width = 3840
+texture_height = 1440
+# Please don't change these
+texture_samples = 1
+arc_resolution = 25
+
+[main_window]
+# The size of the monitoring window.
+# Currently scaling to 1/2 of texture resolution
+width = 1920
+height = 720
+
+
+[frame_recorder]
+# Settings for the frame recorder
+# Frame limit of 30000 frames is about 16m40s at 30fps
+# Frame limit of 50000 frames is about 13m53s at 60fps
+frame_limit = 50000
+fps = 30

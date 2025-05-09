@@ -5,7 +5,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     error::Error,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -13,12 +13,19 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::{
     config::GemmaConfig,
-    models::{History, HistoryItem},
+    events::EventBus,
+    models::{Conversation, ConvoItem},
 };
 
-pub struct GemmaManager {
+// Event interface
+#[derive(Clone, Debug)]
+pub enum GemmaEvent {
+    GemmaReceived(GemmaResponse),
+    DefaultEvent,
+}
+
+pub struct GemmaService {
     pub instances: HashMap<GemmaPersona, GemmaInstance>, //<id, GemmaInstance>
-    responses: VecDeque<GemmaResponse>,                  // collected responses from Gemma API
 
     // System prompt
     system_prompt: String,
@@ -32,30 +39,42 @@ pub struct GemmaManager {
     // API common
     api_key: String,
 
+    // Events channel
+    event_tx: broadcast::Sender<GemmaEvent>,
+
     // Shutdown channel
     shutdown_tx: broadcast::Sender<()>,
 }
 
-impl GemmaManager {
-    pub fn new(config: &GemmaConfig, api_key: &str) -> Self {
+impl GemmaService {
+    pub fn new(config: &GemmaConfig, api_key: &str, events: &EventBus) -> Self {
         let system_prompt = config.system.prompt.to_owned();
         let runtime =
             tokio::runtime::Runtime::new().expect("Failed to start Tokio runtime for GemmaManager");
         let (shutdown_tx, _) = broadcast::channel(1);
         let instances = make_personas_from_config(config);
+        let event_tx = events.gemma.clone();
 
         Self {
             instances,
-            responses: VecDeque::new(),
             system_prompt,
             runtime: Some(runtime),
             client: Client::new(),
             api_key: api_key.to_owned(),
+            event_tx,
             shutdown_tx,
         }
     }
 
-    pub fn send(&mut self, new_item: &HistoryItem, history: &History) -> Result<(), String> {
+    pub fn update(&mut self) {
+        self.receive_all();
+    }
+
+    pub fn send(
+        &mut self,
+        new_item: &ConvoItem,
+        conversation: &Conversation,
+    ) -> Result<(), String> {
         // Determine who should speak next
         let gemma_instance = self.instances.get(&self.next_instance()).unwrap();
 
@@ -65,7 +84,8 @@ impl GemmaManager {
         let model = gemma_instance.model.clone();
 
         // Generate API request content
-        let contents = gemma_instance.generate_contents(new_item, history, &self.system_prompt);
+        let contents =
+            gemma_instance.generate_contents(new_item, conversation, &self.system_prompt);
 
         if let Some(runtime) = &self.runtime {
             let tx = gemma_instance.tx.clone();
@@ -107,16 +127,16 @@ impl GemmaManager {
         Ok(())
     }
 
-    // Collect Gemma responses into the queue for exposure to Main
+    // Collect Gemma responses and broadcast
     pub fn receive_all(&mut self) {
         for instance in self.instances.values_mut() {
             match instance.rx.try_recv() {
                 Ok(Some(message)) => {
                     println!("{}: {}", instance.id, message);
-                    self.responses.push_back(GemmaResponse {
+                    let _ = self.event_tx.send(GemmaEvent::GemmaReceived(GemmaResponse {
                         author: instance.id.to_owned(),
                         message,
-                    });
+                    }));
                 }
                 Ok(None) => {
                     println!("Received empty response from Gemma task: {}", instance.id);
@@ -131,15 +151,6 @@ impl GemmaManager {
         self.instances.insert(persona, instance);
     }
 
-    // Pop the first entry in the queue of reponses
-    pub fn responses_pop_front(&mut self) -> Option<GemmaResponse> {
-        self.responses.pop_front()
-    }
-
-    pub fn has_queued_responses(&self) -> bool {
-        !self.responses.is_empty()
-    }
-
     // A simple determination of next speaker, for now
     fn next_instance(&self) -> GemmaPersona {
         let time = SystemTime::now()
@@ -147,7 +158,7 @@ impl GemmaManager {
             .unwrap()
             .as_secs();
         let num = time % 2;
-        println!("Number: {}", num);
+        println!("Gemma Number: {}", num);
         match num {
             0 => GemmaPersona::Gemma1,
             1 => GemmaPersona::Gemma2,
@@ -158,7 +169,7 @@ impl GemmaManager {
     /**************************** Shutdown **************************************/
 
     pub fn shutdown(&mut self) {
-        println!("...Shutting down GemmaManager...");
+        println!("...Shutting down GemmaService...");
 
         // Signal all tasks to terminate
         let _ = self.shutdown_tx.send(());
@@ -177,9 +188,9 @@ impl GemmaManager {
     }
 }
 
-impl Drop for GemmaManager {
+impl Drop for GemmaService {
     fn drop(&mut self) {
-        println!("...GemmaManager being dropped");
+        println!("...GemmaService being dropped");
         self.shutdown();
         // Wait briefly
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -297,8 +308,8 @@ impl GemmaInstance {
     // generate request content to be sent to this instance
     pub fn generate_contents(
         &self,
-        new_item: &HistoryItem,
-        history: &History,
+        new_item: &ConvoItem,
+        conversation: &Conversation,
         system_prompt: &str,
     ) -> Vec<RequestContent> {
         // attach prompt to the message content
@@ -310,7 +321,7 @@ impl GemmaInstance {
         }];
 
         // Add conversation history
-        for item in history.values() {
+        for item in conversation.values() {
             // assign role according to message author
             let role = if item.author == self.id {
                 "model"
@@ -351,6 +362,7 @@ pub struct Personality {
 }
 
 // A parsed response from a Gemma persona
+#[derive(Clone, Debug)]
 pub struct GemmaResponse {
     pub author: String,
     pub message: String,

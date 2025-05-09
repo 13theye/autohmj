@@ -62,3 +62,14 @@ pub struct PersonaConfig {
     pub model: String,
     pub prompt: String,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct GridConfig {
+    pub font_size_text: u32,
+    pub font_size_translation: u32,
+    pub rows: usize,
+    pub cols: usize,
+    pub top_margin: u32,
+    pub bottom_margin: u32,
+    pub left_right_margin: u32,
+}

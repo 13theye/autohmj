@@ -13,12 +13,13 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub frame_recorder: FrameRecorderConfig,
+    pub grid: GridConfig,
+    pub main_window: MainWindowConfig,
     pub osc: OscConfig,
     pub paths: PathConfig,
-    pub speed: SpeedConfig,
     pub rendering_main: RenderMainConfig,
-    pub main_window: MainWindowConfig,
     pub server: ServerConfig,
+    pub speed: SpeedConfig,
 }
 
 #[derive(Debug, Deserialize)]

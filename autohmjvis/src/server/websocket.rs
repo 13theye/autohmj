@@ -4,7 +4,10 @@
 //
 // Needs tokio runtime because main app is sync
 
-use crate::models::HMJMessage;
+use crate::{
+    events::{ConvoEvent, EventBus},
+    models::HMJMessage,
+};
 use futures_util::{SinkExt, StreamExt};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::{
@@ -13,21 +16,34 @@ use tokio::{
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
+// Event Interface
+#[derive(Clone, Debug)]
+pub enum ServerEvent {
+    RequestConversation,            // need to broadcast Conversation
+    RequestConversationFor(String), // need to send Conversation to Client ID
+}
+
 pub struct HMJServer {
     // Server configuration
     port: u32,
 
-    // Communication channels for Nannou integration
+    // Async task channel
     message_tx: mpsc::Sender<HMJMessage>,
     message_rx: mpsc::Receiver<HMJMessage>,
+
+    // Client broadcast channel
     broadcast_tx: broadcast::Sender<String>,
 
-    // Clients
+    // Clients with direct channel
     clients: Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>,
 
     // Client Registration channel
     reg_tx: mpsc::Sender<String>,
     reg_rx: mpsc::Receiver<String>,
+
+    // Events channel
+    event_tx: broadcast::Sender<ServerEvent>,
+    history_rx: broadcast::Receiver<ConvoEvent>, // subscribe to HistoryEvents
 
     // Tokio runtime
     pub runtime: Option<tokio::runtime::Runtime>,
@@ -37,12 +53,16 @@ pub struct HMJServer {
 }
 
 impl HMJServer {
-    pub fn new(port: u32) -> Self {
+    pub fn new(port: u32, events: &EventBus) -> Self {
         // Create comms channels
         let (message_tx, message_rx) = mpsc::channel(16);
         let (broadcast_tx, _) = broadcast::channel(16);
         let (shutdown_tx, _) = broadcast::channel(1);
         let (reg_tx, reg_rx) = mpsc::channel(16);
+
+        // Set up events channels
+        let event_tx = events.server.clone();
+        let history_rx = events.convo.subscribe();
 
         Self {
             port,
@@ -52,8 +72,31 @@ impl HMJServer {
             clients: Arc::new(Mutex::new(HashMap::new())),
             reg_tx,
             reg_rx,
+            event_tx,
+            history_rx,
             runtime: None,
             shutdown_tx,
+        }
+    }
+
+    pub fn update(&mut self) {
+        self.process_events();
+        self.gather_registrations();
+    }
+
+    fn process_events(&mut self) {
+        while let Ok(event) = self.history_rx.try_recv() {
+            match event {
+                // Broadcast Conversation to all Clients
+                ConvoEvent::BroadcastConvoCommand(convo) => {
+                    self.broadcast(convo);
+                }
+                // Send Conversation to a specific client
+                ConvoEvent::SendConvoCommand(client_id, convo) => {
+                    self.send_to_client(&client_id, convo);
+                }
+                _ => {}
+            }
         }
     }
 
@@ -157,8 +200,12 @@ impl HMJServer {
     }
 
     // Get newly registered clients
-    pub fn get_new_registrations(&mut self) -> Option<String> {
-        self.reg_rx.try_recv().ok()
+    pub fn gather_registrations(&mut self) {
+        while let Ok(client_id) = self.reg_rx.try_recv() {
+            let _ = self
+                .event_tx
+                .send(ServerEvent::RequestConversationFor(client_id));
+        }
     }
 
     /// Shutdown the server gracefully

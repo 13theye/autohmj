@@ -1,5 +1,8 @@
-pub mod gemma_manager;
-pub use gemma_manager::{GemmaManager, GemmaPersona, GemmaResponse};
+pub mod convo;
+pub use convo::{ConversationService, ConvoEvent};
+
+pub mod gemma;
+pub use gemma::{GemmaEvent, GemmaPersona, GemmaResponse, GemmaService};
 
 pub mod translate;
-pub use translate::{Translate, TranslationType};
+pub use translate::{Translate, TranslationEvent, TranslationService, TranslationType};
