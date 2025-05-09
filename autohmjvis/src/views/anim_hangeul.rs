@@ -7,8 +7,6 @@ use std::collections::HashMap;
 // The state of a Hangeul character being typed
 #[derive(Debug, Clone)]
 pub enum HangeulState {
-    // Nothing yet
-    Blank,
     // just the leading consonant
     Choseong(char),
     // Leading consonant + vowel
@@ -41,18 +39,15 @@ impl HangeulAnimator {
             }
 
             // Convert progress to a state index
-            let state_index = if progress < 0.6 {
+            let state_index = if progress < 0.4 {
                 0
             } else if progress < 0.8 {
                 1
-            } else if progress < 1.0 {
-                2
             } else {
-                3
+                2
             };
 
             match &states[state_index] {
-                HangeulState::Blank => '\u{200B}', // non-whitespace blank
                 HangeulState::Choseong(c) => *c,
                 HangeulState::ChoJungseong(c) => *c,
                 HangeulState::Complete(_) => ch,
@@ -66,7 +61,6 @@ impl HangeulAnimator {
     // Populate typing states of a Hangeul character
     fn create_states(&self, ch: char) -> Vec<HangeulState> {
         let mut states = Vec::new();
-        states.push(HangeulState::Blank);
 
         if let Ok((choseong, jungseong, _jeongseong)) = hangeul::decompose_char(&ch) {
             // Push leading consonant

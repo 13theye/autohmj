@@ -1,9 +1,10 @@
 // src/services/animation.rs
 //
 // Handle text typing animation
+use nannou::rand::{thread_rng, Rng};
+use std::collections::HashMap;
 
 use crate::views::{anim_hangeul::HangeulAnimator, grid::CharacterEntity};
-use std::collections::HashMap;
 
 // Track animation state for each message
 pub struct AnimationController {
@@ -22,6 +23,8 @@ struct MessageAnimation {
     start_time: f32,
     variation: f32,
     char_progress: Vec<f32>, // track animation progress for each char (0.0-1.0)
+    char_speed_factors: Vec<f32>, // speed variations at the char level
+    char_start_times: Vec<Option<f32>>, // start time of character reveal; None if not revealed
 }
 
 // Event interface
@@ -58,16 +61,37 @@ impl AnimationController {
         self.hangeul_animator.analyze(message);
         let char_progress = vec![0.0; char_count];
 
+        // Generate random timing variations for each character
+        let mut char_speed_factors = Vec::with_capacity(char_count);
+        let mut char_start_times = vec![None; char_count];
+
+        let mut rng = thread_rng();
+
+        // Generate random timing variations for each character
+        for _ in 0..char_count {
+            // Generate a random factor between (1 - variation/2) and (1 + variation)
+            let speed_factor = 1.0 + rng.gen_range(-self.variation..self.variation);
+
+            char_speed_factors.push(speed_factor);
+        }
+
+        // Initialize the first character to start immediately
+        if char_count > 0 {
+            char_start_times[0] = Some(start_time);
+        }
+
         self.animations.insert(
             message_id,
             MessageAnimation {
                 message_key: message_id,
                 total_chars: char_count,
-                revealed_chars: 0,
+                revealed_chars: 1,
                 complete: false,
                 start_time,
                 variation: self.variation,
                 char_progress,
+                char_speed_factors,
+                char_start_times,
             },
         );
     }
@@ -75,46 +99,41 @@ impl AnimationController {
     fn tick(&mut self, time: f32, message_key: usize) {
         if let Some(animation) = self.animations.get_mut(&message_key) {
             if !animation.complete {
-                // Calculate how many chars should be revealed by now
-                let elapsed = time - animation.start_time;
-                let target_revealed = (elapsed * self.reveal_speed) as usize;
+                let next_reveal_index = animation.revealed_chars;
 
-                // Update progress for each visible character
-                // for i in 0..animation.revealed_chars.min(animation.char_progress.len()) {
-                for i in 0..target_revealed.min(animation.char_progress.len()) {
+                // 1. Update progress for all currently visible characters
+                for i in 0..next_reveal_index.min(animation.char_progress.len()) {
                     // Calculate how long this character has been visible
-                    let char_start_time = (i as f32 / self.reveal_speed) + animation.start_time;
-                    let char_elapsed = time - char_start_time;
 
-                    if char_elapsed > 0.0 {
-                        // For Hangeul: progress through jamo states over a short time
-                        // For non-Hangul: instantly complete (progress = 1.0)
-                        // 4x faster for individual jamo
-                        animation.char_progress[i] =
-                            (char_elapsed / (self.reveal_speed / 4.0)).min(1.0);
-                    }
-                }
+                    if let Some(char_start_time) = animation.char_start_times[i] {
+                        // Calculate how long this char has been visible
+                        let char_elapsed = time - char_start_time;
 
-                // Update revealed count
-                animation.revealed_chars = target_revealed.max(animation.revealed_chars);
+                        if char_elapsed > 0.0 {
+                            // Get this character's speed factor
+                            let char_factor = animation.char_speed_factors.get(i).unwrap_or(&1.0);
 
-                // Check if animation is complete
-                if animation.revealed_chars >= animation.total_chars {
-                    animation.revealed_chars = animation.total_chars;
-                    // Check if all characters have completed their individual animations
-                    let all_chars_complete = animation
-                        .char_progress
-                        .iter()
-                        .all(|&progress| progress >= 0.99);
-
-                    if all_chars_complete {
-                        // Only set complete flag when all characters have finished animating
-                        animation.complete = true;
-
-                        // Ensure all characters show their final form
-                        for progress in &mut animation.char_progress {
-                            *progress = 1.0;
+                            // Update progress
+                            animation.char_progress[i] =
+                                (char_elapsed / (self.reveal_speed / 4.0 * char_factor)).min(1.0);
                         }
+
+                        // Check if this character is complete and should trigger the next one
+                        if i == animation.revealed_chars - 1
+                            && animation.char_progress[i] >= 0.99
+                            && next_reveal_index < animation.total_chars
+                        {
+                            let mut rng = thread_rng();
+                            let delay = 0.03 * rng.gen_range(0.85..5.0); //  delay(s) between characters
+                            animation.char_start_times[next_reveal_index] = Some(time + delay);
+                            animation.revealed_chars += 1;
+                        }
+                    }
+
+                    // The animation is done when the last character completes
+                    if animation.revealed_chars >= animation.total_chars {
+                        animation.complete =
+                            animation.char_progress[animation.total_chars - 1] >= 0.99;
                     }
                 }
             }
@@ -124,20 +143,18 @@ impl AnimationController {
     fn apply(&mut self, message_key: usize, entities: &mut [CharacterEntity]) {
         let cleanup = match self.animations.get(&message_key) {
             Some(animation) => {
-                for (i, entity) in entities.iter_mut().enumerate() {
-                    entity.is_visible = i < animation.revealed_chars;
+                for (idx, entity) in entities.iter_mut().enumerate() {
+                    entity.is_visible = idx < animation.revealed_chars;
 
                     // If visible and a Hangul character, update the display character based on progress
-                    if entity.is_visible && entity.is_hangeul && i < animation.char_progress.len() {
-                        let progress = animation.char_progress[i];
-                        if progress < 1.0 {
-                            // Get the appropriate Jamo state based on progress
-                            entity.display_char = self
-                                .hangeul_animator
-                                .get_char_state(entity.character, progress);
-                        } else {
-                            // Show the complete character
-                            entity.display_char = entity.character;
+                    if entity.is_visible && entity.is_hangeul {
+                        if let Some(&progress) = animation.char_progress.get(idx) {
+                            entity.display_char = if progress < 1.0 {
+                                self.hangeul_animator
+                                    .get_char_state(entity.character, progress)
+                            } else {
+                                entity.character
+                            };
                         }
                     }
                 }

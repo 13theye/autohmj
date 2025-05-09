@@ -92,7 +92,7 @@ impl TextGrid {
         let translation_rx = events.translation.subscribe();
 
         // Animation
-        let animation = AnimationController::new(3.0, 1.0);
+        let animation = AnimationController::new(1.0, 0.5);
 
         Self {
             id: id.to_owned(),
