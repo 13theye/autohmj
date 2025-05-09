@@ -133,9 +133,8 @@ impl TextGrid {
     }
 
     fn update_animation(&mut self, time: f32) {
-        self.animation.update(time);
         if let Some((key, _)) = self.latest {
-            self.animation.apply(key, &mut self.content_chars);
+            self.animation.update(time, key, &mut self.content_chars);
         }
     }
 
@@ -150,8 +149,11 @@ impl TextGrid {
                             self.content_chars =
                                 self.character_entities_from(&new_convo_item.message);
                             self.latest = Some((new_key, new_convo_item));
-                            self.animation
-                                .register(new_key, self.content_chars.len(), time);
+
+                            if !self.is_human {
+                                self.animation
+                                    .register(new_key, self.content_chars.len(), time);
+                            }
                         }
 
                         // This is the 1st message by this author
@@ -159,8 +161,10 @@ impl TextGrid {
                         self.content_chars = self.character_entities_from(&new_convo_item.message);
                         self.latest = Some((new_key, new_convo_item));
 
-                        self.animation
-                            .register(new_key, self.content_chars.len(), time);
+                        if !self.is_human {
+                            self.animation
+                                .register(new_key, self.content_chars.len(), time);
+                        }
                     }
                 }
             }
@@ -221,7 +225,7 @@ impl TextGrid {
 
             return true;
 
-            // Render live content
+            // Render live content; no translation
         } else if let Some(human_msg) = self.connections.read().unwrap().get(&self.id) {
             let human_msg = human_msg.trim();
             let chars = self.character_entities_from(human_msg);
@@ -303,7 +307,7 @@ impl TextGrid {
                 position,
                 color: self.base_color,
                 font_size: self.font_size,
-                is_visible: false,
+                is_visible: true,
             });
 
             col += 1;
