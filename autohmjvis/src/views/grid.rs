@@ -20,11 +20,13 @@ use crate::{
 // Wraps display state information for a character
 #[derive(Debug)]
 pub struct CharacterEntity {
-    character: char,
+    pub character: char,    // The complete character
+    pub display_char: char, // The character currently being displayed
     position: Point2,
     color: Rgba,
     font_size: u32,
     pub is_visible: bool,
+    pub is_hangeul: bool,
 }
 
 // Handles character positioning
@@ -90,7 +92,7 @@ impl TextGrid {
         let translation_rx = events.translation.subscribe();
 
         // Animation
-        let animation = AnimationController::new(7.0, 1.0);
+        let animation = AnimationController::new(3.0, 1.0);
 
         Self {
             id: id.to_owned(),
@@ -144,27 +146,37 @@ impl TextGrid {
             if let ConvoEvent::ItemAdded(new_key, new_convo_item) = event {
                 if new_convo_item.author == self.id {
                     // Update latest message
-                    if let Some((key, _)) = &self.latest {
+                    if let Some((key, item)) = &self.latest {
                         if new_key != *key {
                             self.content_chars =
                                 self.character_entities_from(&new_convo_item.message);
-                            self.latest = Some((new_key, new_convo_item));
 
                             if !self.is_human {
-                                self.animation
-                                    .register(new_key, self.content_chars.len(), time);
+                                self.animation.register(
+                                    new_key,
+                                    &new_convo_item.message,
+                                    self.content_chars.len(),
+                                    time,
+                                );
                             }
+
+                            self.latest = Some((new_key, new_convo_item));
                         }
 
                         // This is the 1st message by this author
                     } else {
                         self.content_chars = self.character_entities_from(&new_convo_item.message);
-                        self.latest = Some((new_key, new_convo_item));
 
                         if !self.is_human {
-                            self.animation
-                                .register(new_key, self.content_chars.len(), time);
+                            self.animation.register(
+                                new_key,
+                                &new_convo_item.message,
+                                self.content_chars.len(),
+                                time,
+                            );
                         }
+
+                        self.latest = Some((new_key, new_convo_item));
                     }
                 }
             }
@@ -300,14 +312,17 @@ impl TextGrid {
                 continue;
             }
 
+            let is_hangeul = hangeul::is_hangeul(ch as u32);
             let position = self.place_char_at(row, col);
 
             entities.push(CharacterEntity {
                 character: ch,
+                display_char: ch,
                 position,
                 color: self.base_color,
                 font_size: self.font_size,
                 is_visible: true,
+                is_hangeul,
             });
 
             col += 1;
@@ -326,7 +341,7 @@ impl TextGrid {
 // Draw a single character entity
 pub fn draw_character(draw: &Draw, entity: &CharacterEntity, font: &Font) {
     if entity.is_visible {
-        draw.text(&entity.character.to_string())
+        draw.text(&entity.display_char.to_string())
             .font(font.clone())
             .x_y(entity.position.x, entity.position.y)
             .color(entity.color)

@@ -7,3 +7,5 @@ pub use background::BackgroundManager;
 
 pub mod grid;
 pub use grid::TextGrid;
+
+pub mod anim_hangeul;
