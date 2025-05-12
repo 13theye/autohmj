@@ -13,7 +13,7 @@ use std::{
 };
 
 use autohmjvis::{
-    config::{AuthConfig, Config, GemmaConfig, GridConfig},
+    config::{AuthConfig, Config, GemmaConfig, GridConfig, OscSendConfig},
     events::EventBus,
     models::HMJMessage,
     server::HMJServer,
@@ -35,13 +35,13 @@ struct Model {
     // View components
     grids: Vec<TextGrid>,
 
-    // Fonts
-    korean_font: Font,
-    latin_font: Font,
-
     // WebSockets for client
     server: HMJServer,
     connections: Arc<RwLock<HashMap<String, String>>>, // a shared reference to live input
+
+    // Fonts
+    korean_font: Font,
+    latin_font: Font,
 
     // Nannou API
     draw: nannou::Draw,
@@ -172,6 +172,7 @@ fn model(app: &App) -> Model {
         &gemma_config,
         &events,
         connections.clone(),
+        &config.osc_send,
     );
 
     Model {
@@ -269,6 +270,7 @@ fn init_three_grids(
     gemma_config: &GemmaConfig,
     events: &EventBus,
     connections: Arc<RwLock<HashMap<String, String>>>,
+    osc_config: &OscSendConfig,
 ) -> Vec<TextGrid> {
     // Get window size
     let rect = app.main_window().rect();
@@ -300,6 +302,7 @@ fn init_three_grids(
         &center_col,
         events,
         connections.clone(),
+        osc_config,
     );
 
     let gemma1_grid = TextGrid::new(
@@ -310,6 +313,7 @@ fn init_three_grids(
         &left_col,
         events,
         connections.clone(),
+        osc_config,
     );
 
     let gemma2_grid = TextGrid::new(
@@ -320,6 +324,7 @@ fn init_three_grids(
         &right_col,
         events,
         connections.clone(),
+        osc_config,
     );
 
     vec![human_grid, gemma1_grid, gemma2_grid]

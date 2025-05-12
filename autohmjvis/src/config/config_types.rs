@@ -12,7 +12,7 @@ pub struct MainWindowConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct ServerConfig {
-    pub port: u32,
+    pub port: u16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,8 +42,9 @@ pub struct PathConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct OscConfig {
-    pub rx_port: u16,
+pub struct OscSendConfig {
+    pub target_addr: String,
+    pub target_port: u16,
 }
 
 #[derive(Debug, Deserialize)]

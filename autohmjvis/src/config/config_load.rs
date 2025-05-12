@@ -15,7 +15,7 @@ pub struct Config {
     pub frame_recorder: FrameRecorderConfig,
     pub grid: GridConfig,
     pub main_window: MainWindowConfig,
-    pub osc: OscConfig,
+    pub osc_send: OscSendConfig,
     pub paths: PathConfig,
     pub rendering_main: RenderMainConfig,
     pub server: ServerConfig,
