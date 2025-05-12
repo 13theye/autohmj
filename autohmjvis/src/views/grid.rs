@@ -19,7 +19,7 @@ use crate::{
 };
 
 // Wraps display state information for a character
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct CharacterEntity {
     pub character: char,    // The complete character
     pub display_char: char, // The character currently being displayed
@@ -36,7 +36,6 @@ pub struct TextGrid {
     is_human: bool,                                    // is this grid for a human?
     latest: Option<(usize, ConvoItem)>,                // the latest (key, message)
     content_chars: Vec<CharacterEntity>,               // the latest message broken up into chars
-    current_char: Arc<CharacterEntity>, // shared reference to the current character drawn, post modification by animation
     connections: Arc<RwLock<HashMap<String, String>>>, // reference to model.connections
 
     // animation
@@ -77,9 +76,6 @@ impl TextGrid {
         connections: Arc<RwLock<HashMap<String, String>>>,
         osc_config: &OscSendConfig,
     ) -> Self {
-        // Initialize shared character reference
-        let current_char = Arc::new(CharacterEntity::default());
-
         // Calculate grid dimensions
         let font_size = grid_config.font_size_text;
         let cell_width = font_size as f32 * 2.0;
@@ -112,7 +108,6 @@ impl TextGrid {
             is_human,
             latest: None,
             content_chars: Vec::new(),
-            current_char,
             connections,
 
             animation,
@@ -213,7 +208,7 @@ impl TextGrid {
 
     #[allow(clippy::too_many_arguments)]
     fn draw(
-        &mut self,
+        &self,
         draw: &Draw,
         text_layout: &Layout,
         font: &Font,
@@ -233,7 +228,7 @@ impl TextGrid {
     }
 
     // Draws grid text and returns true if translation should be drawn
-    fn draw_grid_then_continue(&mut self, draw: &Draw, font: &Font) -> bool {
+    fn draw_grid_then_continue(&self, draw: &Draw, font: &Font) -> bool {
         // Render convo content if live input is blank
         if !self.is_human
             || (self.connections.read().unwrap().is_empty()
@@ -246,8 +241,7 @@ impl TextGrid {
         {
             for entity in self.content_chars.iter() {
                 if entity.is_visible {
-                    self.current_char = Arc::from(entity.clone());
-                    self::draw_character(draw, self.current_char.clone(), font);
+                    self::draw_character(draw, entity, font);
                 }
             }
 
@@ -259,8 +253,7 @@ impl TextGrid {
             let chars = self.character_entities_from(human_msg);
             for mut entity in chars {
                 entity.is_visible = true;
-                self.current_char = Arc::from(entity.clone());
-                self::draw_character(draw, self.current_char.clone(), font);
+                self::draw_character(draw, &entity, font);
             }
         }
 
@@ -356,7 +349,7 @@ impl TextGrid {
 }
 
 // Draw a single character entity
-pub fn draw_character(draw: &Draw, entity: Arc<CharacterEntity>, font: &Font) {
+pub fn draw_character(draw: &Draw, entity: &CharacterEntity, font: &Font) {
     if entity.is_visible {
         draw.text(&entity.display_char.to_string())
             .font(font.clone())
