@@ -13,21 +13,25 @@ use crate::{
     config::{GridConfig, OscSendConfig},
     events::EventBus,
     models::ConvoItem,
-    osc::OscSender,
-    services::{ConvoEvent, TranslationEvent, TranslationType},
+    services::{ClockService, ConvoEvent, Sequencer, TranslationEvent, TranslationType},
     views::AnimationController,
 };
 
 // Wraps display state information for a character
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CharacterEntity {
     pub character: char,    // The complete character
-    pub display_char: char, // The character currently being displayed
+    pub display_char: char, // The character currently being displayed (i.e. partial Hangeul)
     position: Point2,
     color: Rgba,
     font_size: u32,
     pub is_visible: bool,
     pub is_hangeul: bool,
+
+    // animation
+    pub animation_start: Option<f32>,
+    pub animation_duration: f32,
+    pub is_animating: bool,
 }
 
 // Handles character positioning
@@ -45,8 +49,9 @@ pub struct TextGrid {
     convo_rx: broadcast::Receiver<ConvoEvent>,
     translation_rx: broadcast::Receiver<TranslationEvent>,
 
-    // Osc
-    osc_sender: OscSender,
+    // Osc & clock
+    sequencer: Sequencer,
+    clock: ClockService,
 
     // attributes
     origin_x: f32,
@@ -101,7 +106,8 @@ impl TextGrid {
         let animation = AnimationController::new(1.0, 0.5);
 
         // Initialize OSC Sender
-        let osc_sender = OscSender::new(osc_config).expect("Failed to create OSC Sender");
+        let sequencer = Sequencer::new(id, osc_config);
+        let clock = ClockService::new(160);
 
         Self {
             id: id.to_owned(),
@@ -111,7 +117,8 @@ impl TextGrid {
             connections,
 
             animation,
-            osc_sender,
+            sequencer,
+            clock,
 
             convo_rx,
             translation_rx,
@@ -141,7 +148,20 @@ impl TextGrid {
     ) {
         self.process_events(time);
         self.update_animation(time);
-        self.draw(draw, text_layout, font, alt_font, translation_type);
+        if self.clock.tick() {
+            self.sequencer.update(&self.content_chars);
+            self.trigger_sequence_animation(time);
+        }
+        self.draw(draw, text_layout, font, alt_font, translation_type, time);
+    }
+
+    fn trigger_sequence_animation(&mut self, time: f32) {
+        if !self.content_chars.is_empty() {
+            let entity = &mut self.content_chars[self.sequencer.current_idx];
+            entity.animation_start = Some(time);
+            entity.animation_duration = 0.3;
+            entity.is_animating = true;
+        }
     }
 
     fn update_animation(&mut self, time: f32) {
@@ -214,8 +234,9 @@ impl TextGrid {
         font: &Font,
         alt_font: &Font,
         translation_type: &TranslationType,
+        time: f32,
     ) {
-        if self.draw_grid_then_continue(draw, font) {
+        if self.draw_grid_then_continue(draw, font, time) {
             self.draw_translation(
                 draw,
                 text_layout,
@@ -228,7 +249,7 @@ impl TextGrid {
     }
 
     // Draws grid text and returns true if translation should be drawn
-    fn draw_grid_then_continue(&self, draw: &Draw, font: &Font) -> bool {
+    fn draw_grid_then_continue(&self, draw: &Draw, font: &Font, time: f32) -> bool {
         // Render convo content if live input is blank
         if !self.is_human
             || (self.connections.read().unwrap().is_empty()
@@ -241,7 +262,7 @@ impl TextGrid {
         {
             for entity in self.content_chars.iter() {
                 if entity.is_visible {
-                    self::draw_character(draw, entity, font);
+                    self::draw_character(draw, entity, font, time);
                 }
             }
 
@@ -253,7 +274,7 @@ impl TextGrid {
             let chars = self.character_entities_from(human_msg);
             for mut entity in chars {
                 entity.is_visible = true;
-                self::draw_character(draw, &entity, font);
+                self::draw_character(draw, &entity, font, time);
             }
         }
 
@@ -333,6 +354,7 @@ impl TextGrid {
                 font_size: self.font_size,
                 is_visible: true,
                 is_hangeul,
+                ..Default::default()
             });
 
             col += 1;
@@ -349,12 +371,73 @@ impl TextGrid {
 }
 
 // Draw a single character entity
-pub fn draw_character(draw: &Draw, entity: &CharacterEntity, font: &Font) {
+pub fn draw_character(draw: &Draw, entity: &CharacterEntity, font: &Font, time: f32) {
     if entity.is_visible {
+        // Default values if not animating
+        let mut size_factor = 1.0;
+        let mut color_brightness = 1.0;
+
+        // Calculate animation effects if character is animating
+        if entity.is_animating {
+            if let Some(start_time) = entity.animation_start {
+                let elapsed = time - start_time;
+                let progress = (elapsed / entity.animation_duration).min(1.0);
+
+                // Size animation: quick attack (30%), longer decay (70%)
+                // Parameters: progress, attack_ratio, exp_attack, exp_decay, amplitude
+                size_factor = animation_curve(
+                    progress, 0.2,  // Peak at _% of animation duration
+                    0.5,  // Quicker initial attack (exp < 1.0 = faster start)
+                    2.0,  // Slower tail decay (exp > 1.0 = longer tail)
+                    0.65, // % size increase at peak
+                );
+
+                // Brightness animation: exponential fade out
+                // Could use animation_curve here too, but a simple exponential decay works well
+                color_brightness = 1.0 + 0.02 * (1.0 - progress).powf(3.0);
+            }
+        }
+
+        // Apply animation factors to size and color
+        let display_size = (entity.font_size as f32 * size_factor) as u32;
+
+        // Brighten the color for the animation
+        let base_color = entity.color;
+        let display_color = rgba(
+            (base_color.red * color_brightness).min(1.0),
+            (base_color.green * color_brightness).min(1.0),
+            (base_color.blue * color_brightness).min(1.0),
+            base_color.alpha,
+        );
+
         draw.text(&entity.display_char.to_string())
             .font(font.clone())
             .x_y(entity.position.x, entity.position.y)
-            .color(entity.color)
-            .font_size(entity.font_size);
+            .color(display_color)
+            .font_size(display_size);
     }
+}
+
+// Animation curve function for flexible pulse effects
+fn animation_curve(
+    progress: f32,
+    attack_ratio: f32,
+    exp_attack: f32,
+    exp_decay: f32,
+    amplitude: f32,
+) -> f32 {
+    let peak_point = attack_ratio;
+
+    let pulse_value = if progress < peak_point {
+        // Attack phase - rise to peak
+        let attack_progress = progress / peak_point;
+        attack_progress.powf(exp_attack) // Lower values = faster initial attack
+    } else {
+        // Decay phase - fall from peak
+        let decay_progress = (progress - peak_point) / (1.0 - peak_point);
+        (1.0 - decay_progress).powf(exp_decay) // Higher values = longer tail
+    };
+
+    // Scale and offset (base = 1.0, add amplitude * pulse_value)
+    1.0 + amplitude * pulse_value
 }

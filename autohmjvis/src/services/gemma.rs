@@ -132,7 +132,7 @@ impl GemmaService {
         for instance in self.instances.values_mut() {
             match instance.rx.try_recv() {
                 Ok(Some(message)) => {
-                    println!("{}: {}", instance.id, message);
+                    //println!("{}: {}", instance.id, message);
                     let _ = self.event_tx.send(GemmaEvent::GemmaReceived(GemmaResponse {
                         author: instance.id.to_owned(),
                         message,
@@ -255,13 +255,13 @@ async fn generate_response(
         },
     };
 
-    println!("\nRequest to gemma: {:#?}", request);
+    //println!("\nRequest to gemma: {:#?}", request);
 
     let http_response = client.post(&url).json(&request).send().await?;
 
     // Log the raw response body before parsing
     let response_text = http_response.text().await?;
-    println!("\nRaw response: {}", response_text);
+    //println!("\nRaw response: {}", response_text);
 
     let response: GemmaRawResponse = serde_json::from_str(&response_text)?;
 

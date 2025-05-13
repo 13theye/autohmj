@@ -17,7 +17,7 @@ font_size_translation = 20
 rows = 8
 cols = 8
 top_margin = 130
-bottom_margin = 130
+bottom_margin = 500
 left_right_margin = 100
 
 [paths]
@@ -31,7 +31,7 @@ gemma = "gemma"
 
 [rendering_main]
 texture_width = 3840
-texture_height = 1440
+texture_height = 2160
 # Please don't change these
 texture_samples = 1
 arc_resolution = 25
@@ -40,7 +40,7 @@ arc_resolution = 25
 # The size of the monitoring window.
 # Currently scaling to 1/2 of texture resolution
 width = 1920
-height = 720
+height = 1080
 
 
 [frame_recorder]
