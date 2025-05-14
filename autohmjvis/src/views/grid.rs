@@ -197,7 +197,7 @@ impl TextGrid {
                             if !self.is_human {
                                 self.animation.register(
                                     new_key,
-                                    &new_convo_item.message,
+                                    &self.content_chars,
                                     self.content_chars.len(),
                                     time,
                                 );
@@ -213,7 +213,7 @@ impl TextGrid {
                         if !self.is_human {
                             self.animation.register(
                                 new_key,
-                                &new_convo_item.message,
+                                &self.content_chars,
                                 self.content_chars.len(),
                                 time,
                             );

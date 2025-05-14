@@ -4,6 +4,8 @@
 
 use std::collections::HashMap;
 
+use crate::views::grid::CharacterEntity;
+
 // The state of a Hangeul character being typed
 #[derive(Debug, Clone)]
 pub enum HangeulState {
@@ -23,10 +25,11 @@ pub struct HangeulAnimator {
 }
 
 impl HangeulAnimator {
-    pub fn analyze(&mut self, text: &str) {
-        for ch in text.chars() {
-            if !self.jamo_states.contains_key(&ch) && is_hangeul_char(ch) {
-                self.jamo_states.insert(ch, self.create_states(ch));
+    pub fn analyze(&mut self, text_vec: &[CharacterEntity]) {
+        for ch in text_vec {
+            let c = ch.character;
+            if !self.jamo_states.contains_key(&c) && is_hangeul_char(c) {
+                self.jamo_states.insert(c, self.create_states(c));
             }
         }
     }

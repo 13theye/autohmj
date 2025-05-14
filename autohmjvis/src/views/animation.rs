@@ -51,11 +51,11 @@ impl AnimationController {
     pub fn register(
         &mut self,
         message_id: usize,
-        message: &str,
+        text_vec: &[CharacterEntity],
         char_count: usize,
         start_time: f32,
     ) {
-        self.hangeul_animator.analyze(message);
+        self.hangeul_animator.analyze(text_vec);
         let char_progress = vec![0.0; char_count];
 
         // Generate random timing variations for each character
