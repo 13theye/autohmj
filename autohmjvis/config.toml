@@ -4,12 +4,12 @@ port = 50001
 
 [osc_send]
 # OSC receiver's IP address (String)
-target_addr = "127.0.0.1"
+target_addr = "192.168.1.131"
 # OSC receiver's port.
-target_port = 8000
+target_port = 10001
 
 [speed]
-bpm = 120
+bpm = 160
 
 [grid]
 font_size_text = 25

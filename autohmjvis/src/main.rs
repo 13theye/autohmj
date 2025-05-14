@@ -13,7 +13,7 @@ use std::{
 };
 
 use autohmjvis::{
-    config::{AuthConfig, Config, GemmaConfig, GridConfig, OscSendConfig},
+    config::{AuthConfig, Config, GemmaConfig, GridConfig, OscSendConfig, SpeedConfig},
     events::EventBus,
     models::HMJMessage,
     server::HMJServer,
@@ -173,6 +173,7 @@ fn model(app: &App) -> Model {
         &events,
         connections.clone(),
         &config.osc_send,
+        &config.speed,
     );
 
     Model {
@@ -271,6 +272,7 @@ fn init_three_grids(
     events: &EventBus,
     connections: Arc<RwLock<HashMap<String, String>>>,
     osc_config: &OscSendConfig,
+    speed_config: &SpeedConfig,
 ) -> Vec<TextGrid> {
     // Get window size
     let rect = app.main_window().rect();
@@ -303,6 +305,7 @@ fn init_three_grids(
         events,
         connections.clone(),
         osc_config,
+        speed_config,
     );
 
     let gemma1_grid = TextGrid::new(
@@ -314,6 +317,7 @@ fn init_three_grids(
         events,
         connections.clone(),
         osc_config,
+        speed_config,
     );
 
     let gemma2_grid = TextGrid::new(
@@ -325,6 +329,7 @@ fn init_three_grids(
         events,
         connections.clone(),
         osc_config,
+        speed_config,
     );
 
     vec![human_grid, gemma1_grid, gemma2_grid]

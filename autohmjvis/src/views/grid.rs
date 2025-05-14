@@ -10,7 +10,7 @@ use std::{
 use tokio::sync::broadcast;
 
 use crate::{
-    config::{GridConfig, OscSendConfig},
+    config::{GridConfig, OscSendConfig, SpeedConfig},
     events::EventBus,
     models::ConvoItem,
     services::{ClockService, ConvoEvent, Sequencer, TranslationEvent, TranslationType},
@@ -80,6 +80,7 @@ impl TextGrid {
         events: &EventBus,
         connections: Arc<RwLock<HashMap<String, String>>>,
         osc_config: &OscSendConfig,
+        speed_config: &SpeedConfig,
     ) -> Self {
         // Calculate grid dimensions
         let font_size = grid_config.font_size_text;
@@ -107,7 +108,7 @@ impl TextGrid {
 
         // Initialize OSC Sender
         let sequencer = Sequencer::new(id, osc_config);
-        let clock = ClockService::new(160);
+        let clock = ClockService::new(speed_config.bpm);
 
         Self {
             id: id.to_owned(),
@@ -169,6 +170,18 @@ impl TextGrid {
             self.animation.update(time, key, &mut self.content_chars);
         }
     }
+
+    // This function lsitens for ItemAdded messages from the ConversationService. If the
+    // author of the message is this grid's author, it reads that message and generates
+    // CharacterEntities from the the message.
+    //
+    // If the author is an AI, we know that there is only one way to handle the content:
+    // run the "typing" animation and feed the currently visible characters to the Sequencer.
+    //
+    // If the author is human, there are two possibilities:
+    // 1. As above
+    // 2. Message is currently "in progress" -- so need need to handle the input via
+    // ...the Connections HashMap in Main. (todo)
 
     fn process_events(&mut self, time: f32) {
         while let Ok(event) = self.convo_rx.try_recv() {
@@ -250,7 +263,10 @@ impl TextGrid {
 
     // Draws grid text and returns true if translation should be drawn
     fn draw_grid_then_continue(&self, draw: &Draw, font: &Font, time: f32) -> bool {
-        // Render convo content if live input is blank
+        // Render previously entered convo content if:
+        // 1. This is an AI's grid
+        // 2. This is a human's grid and the live input is blank
+        // 3. All the humans live inputs are blank (fallback for incomplete multi-user feature)
         if !self.is_human
             || (self.connections.read().unwrap().is_empty()
                 || self
@@ -268,7 +284,7 @@ impl TextGrid {
 
             return true;
 
-            // Render live content; no translation
+        // Render live content; no translation
         } else if let Some(human_msg) = self.connections.read().unwrap().get(&self.id) {
             let human_msg = human_msg.trim();
             let chars = self.character_entities_from(human_msg);
