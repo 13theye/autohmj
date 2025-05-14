@@ -147,6 +147,7 @@ impl TextGrid {
         alt_font: &Font,
         translation_type: &TranslationType,
     ) {
+        self.read_live_input();
         self.process_events(time);
         self.update_animation(time);
         if self.clock.tick() {
@@ -168,6 +169,135 @@ impl TextGrid {
     fn update_animation(&mut self, time: f32) {
         if let Some((key, _)) = self.latest {
             self.animation.update(time, key, &mut self.content_chars);
+        }
+    }
+
+    // Read the live input from the human user
+    fn read_live_input(&mut self) {
+        if let Some(human_msg) = self.connections.read().unwrap().get(&self.id) {
+            // Don't do anything if there's no input and there's a previous  message displayed.
+            if human_msg.is_empty() && self.latest.is_some() {
+                return;
+            }
+
+            if !human_msg.is_empty() && self.latest.is_some() {
+                self.latest = None;
+            }
+
+            let human_msg = human_msg.trim();
+            let new_chars = self.character_entities_from(human_msg);
+
+            // Don't replace if unchanged
+            if new_chars.len() == self.content_chars.len()
+                && new_chars
+                    .iter()
+                    .zip(&self.content_chars)
+                    .all(|(a, b)| a.character == b.character)
+            {
+                return;
+            }
+
+            // APPROACH: Preserve animation states using longest common subsequence logic
+
+            // Create new vector for updated characters
+            let mut updated_chars = Vec::with_capacity(new_chars.len());
+
+            // CASE 1: Last character changed but length stayed the same
+            // This covers Korean composition (ㄱ + ㅏ → 가)
+            if new_chars.len() == self.content_chars.len() {
+                // Check if only the last character differs
+                let prefix_matches = new_chars
+                    .iter()
+                    .zip(&self.content_chars)
+                    .take(new_chars.len() - 1)
+                    .all(|(a, b)| a.character == b.character);
+
+                if prefix_matches {
+                    // Copy all characters including their animation states
+                    for (i, new_entity) in new_chars.into_iter().enumerate() {
+                        let mut entity = new_entity;
+                        // Copy animation state from corresponding position
+                        entity.animation_start = self.content_chars[i].animation_start;
+                        entity.animation_duration = self.content_chars[i].animation_duration;
+                        entity.is_animating = self.content_chars[i].is_animating;
+                        updated_chars.push(entity);
+                    }
+
+                    self.content_chars = updated_chars;
+                    return;
+                }
+            }
+
+            // CASE 2: Appending characters to the end
+            if new_chars.len() > self.content_chars.len()
+                && new_chars
+                    .iter()
+                    .take(self.content_chars.len())
+                    .zip(&self.content_chars)
+                    .all(|(a, b)| a.character == b.character)
+            {
+                // Keep all existing character states
+                for (i, new_entity) in new_chars.into_iter().enumerate() {
+                    if i < self.content_chars.len() {
+                        // Copy existing entity with its animation state
+                        let mut entity = new_entity;
+                        entity.animation_start = self.content_chars[i].animation_start;
+                        entity.animation_duration = self.content_chars[i].animation_duration;
+                        entity.is_animating = self.content_chars[i].is_animating;
+                        updated_chars.push(entity);
+                    } else {
+                        // Append new characters
+                        updated_chars.push(new_entity);
+                    }
+                }
+            }
+            // CASE 3: Removing characters from the end
+            else if new_chars.len() < self.content_chars.len()
+                && new_chars
+                    .iter()
+                    .zip(&self.content_chars)
+                    .all(|(a, b)| a.character == b.character)
+            {
+                // Keep animation states for remaining characters
+                for (i, new_entity) in new_chars.into_iter().enumerate() {
+                    let mut entity = new_entity;
+                    entity.animation_start = self.content_chars[i].animation_start;
+                    entity.animation_duration = self.content_chars[i].animation_duration;
+                    entity.is_animating = self.content_chars[i].is_animating;
+                    updated_chars.push(entity);
+                }
+            }
+            // CASE 4: Text changed in the middle
+            else {
+                // Create a mapping of positions with same characters
+                let mut position_map = Vec::new();
+
+                // Find matching positions
+                for (new_idx, new_char) in new_chars.iter().enumerate() {
+                    for (old_idx, old_char) in self.content_chars.iter().enumerate() {
+                        if new_char.character == old_char.character && old_char.is_animating {
+                            position_map.push((new_idx, old_idx));
+                            break; // Only map each old character once
+                        }
+                    }
+                }
+
+                // Apply animation states based on mapping
+                for (i, mut entity) in new_chars.into_iter().enumerate() {
+                    // Find if this position has a mapping
+                    if let Some((_, old_idx)) =
+                        position_map.iter().find(|(new_idx, _)| *new_idx == i)
+                    {
+                        entity.animation_start = self.content_chars[*old_idx].animation_start;
+                        entity.animation_duration = self.content_chars[*old_idx].animation_duration;
+                        entity.is_animating = self.content_chars[*old_idx].is_animating;
+                    }
+                    updated_chars.push(entity);
+                }
+            }
+
+            // Update content chars with new vector
+            self.content_chars = updated_chars;
         }
     }
 
@@ -202,7 +332,6 @@ impl TextGrid {
                                     time,
                                 );
                             }
-
                             self.latest = Some((new_key, new_convo_item));
                         }
 
@@ -241,7 +370,7 @@ impl TextGrid {
 
     #[allow(clippy::too_many_arguments)]
     fn draw(
-        &self,
+        &mut self,
         draw: &Draw,
         text_layout: &Layout,
         font: &Font,
@@ -262,7 +391,7 @@ impl TextGrid {
     }
 
     // Draws grid text and returns true if translation should be drawn
-    fn draw_grid_then_continue(&self, draw: &Draw, font: &Font, time: f32) -> bool {
+    fn draw_grid_then_continue(&mut self, draw: &Draw, font: &Font, time: f32) -> bool {
         // Render previously entered convo content if:
         // 1. This is an AI's grid
         // 2. This is a human's grid and the live input is blank
@@ -285,12 +414,10 @@ impl TextGrid {
             return true;
 
         // Render live content; no translation
-        } else if let Some(human_msg) = self.connections.read().unwrap().get(&self.id) {
-            let human_msg = human_msg.trim();
-            let chars = self.character_entities_from(human_msg);
-            for mut entity in chars {
+        } else {
+            for entity in self.content_chars.iter_mut() {
                 entity.is_visible = true;
-                self::draw_character(draw, &entity, font, time);
+                self::draw_character(draw, entity, font, time);
             }
         }
 
