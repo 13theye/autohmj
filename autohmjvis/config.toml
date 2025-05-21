@@ -12,13 +12,15 @@ target_port = 8000
 bpm = 160
 
 [grid]
-font_size_text = 25
-font_size_translation = 20
+font_size_text = 50
+font_size_translation = 40
 rows = 8
 cols = 8
-top_margin = 130
-bottom_margin = 500
-left_right_margin = 100
+# margin between top of window and beginning of text grid: (Int)
+top_margin = 200
+# margin between end of text grid and translation: (Int)
+bottom_margin = 100
+left_right_margin = 300
 
 [paths]
 #paths are relative to executable directory

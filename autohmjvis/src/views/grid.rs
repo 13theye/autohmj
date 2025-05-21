@@ -50,7 +50,7 @@ pub struct TextGrid {
     translation_rx: broadcast::Receiver<TranslationEvent>,
 
     // Osc & clock
-    sequencer: Sequencer,
+    pub sequencer: Sequencer,
     clock: ClockService,
 
     // attributes
@@ -67,6 +67,7 @@ pub struct TextGrid {
     base_color: Rgba,
     translation_color: Rgba,
     font_size: u32,
+    translation_font_size: u32,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -84,17 +85,18 @@ impl TextGrid {
     ) -> Self {
         // Calculate grid dimensions
         let font_size = grid_config.font_size_text;
+        let translation_font_size = grid_config.font_size_translation;
         let cell_width = font_size as f32 * 2.0;
         let cell_height = cell_width;
         let rows = grid_config.rows;
         let cols = grid_config.cols;
-        let col_width = cell_width * cols as f32 * 0.95;
+        let col_width = cell_width * cols as f32;
 
         // Calculate positioning
-        let window_top = window_dims.1 / 2.0;
-        let window_bottom = window_dims.1 / -2.0;
+        let window_top = window_dims.1;
         let message_y = window_top - grid_config.top_margin as f32;
-        let translation_y = window_bottom + grid_config.bottom_margin as f32;
+        let translation_y =
+            message_y - (rows as f32 * cell_height) - grid_config.bottom_margin as f32;
         let origin_x = column.x() - col_width / 2.0 + cell_width / 2.0;
 
         let base_color = rgba(0.71, 0.71, 1.0, 1.0);
@@ -135,6 +137,7 @@ impl TextGrid {
             base_color,
             translation_color,
             font_size,
+            translation_font_size,
         }
     }
 
@@ -453,7 +456,7 @@ impl TextGrid {
                         translation_y,
                     )
                     .color(self.translation_color)
-                    .font_size(20);
+                    .font_size(self.translation_font_size);
             }
         }
     }
@@ -482,7 +485,9 @@ impl TextGrid {
             }
 
             // Skip spaces and punctuation
-            if ch.is_whitespace() || ch.is_ascii_punctuation() {
+            if
+            /*ch.is_whitespace() ||*/
+            ch.is_ascii_punctuation() {
                 continue;
             }
 
@@ -529,15 +534,15 @@ pub fn draw_character(draw: &Draw, entity: &CharacterEntity, font: &Font, time: 
                 // Size animation: quick attack (30%), longer decay (70%)
                 // Parameters: progress, attack_ratio, exp_attack, exp_decay, amplitude
                 size_factor = animation_curve(
-                    progress, 0.2,  // Peak at _% of animation duration
-                    0.5,  // Quicker initial attack (exp < 1.0 = faster start)
-                    2.0,  // Slower tail decay (exp > 1.0 = longer tail)
-                    0.65, // % size increase at peak
+                    progress, 0.5, // Peak at _% of animation duration
+                    0.5, // Quicker initial attack (exp < 1.0 = faster start)
+                    0.5, // Slower tail decay (exp > 1.0 = longer tail)
+                    0.5, // % size increase at peak
                 );
 
                 // Brightness animation: exponential fade out
                 // Could use animation_curve here too, but a simple exponential decay works well
-                color_brightness = 1.0 + 0.02 * (1.0 - progress).powf(3.0);
+                color_brightness = 1.0 + 0.1 * (1.0 - progress).powf(3.0);
             }
         }
 

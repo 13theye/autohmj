@@ -32,6 +32,7 @@ impl OscSender {
         let target_addr = config.target_addr.to_owned();
         let target_port = config.target_port;
         let sender = osc::sender()?;
+        println!("OSC Sender sending to {}:{}", target_addr, target_port);
 
         Ok(Self {
             sender,

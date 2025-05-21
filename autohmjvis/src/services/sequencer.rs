@@ -7,6 +7,7 @@ use std::time::Instant;
 
 pub struct Sequencer {
     id: String,
+    pub send: bool,
     beat_count: usize,
     last_clock_time: Instant,
     pub current_idx: usize, // this increments at the START OF BEAT, not after read.
@@ -19,6 +20,7 @@ impl Sequencer {
         let osc_sender = OscSender::new(osc_config).expect("Failed to create OSC Sender");
         Self {
             id: id.to_owned(),
+            send: true,
             beat_count: 0,
             last_clock_time: Instant::now(),
             current_idx: 0,
@@ -92,6 +94,11 @@ impl Sequencer {
             return;
         }
 
+        // Don't send if the self flag is false
+        if !self.send {
+            return;
+        }
+
         // send the num_letters message
         self.osc_sender.send_num_letters(max_id, length as i32);
 
@@ -145,7 +152,7 @@ fn decompose_character(ch: char) -> Vec<char> {
 
 // 12592 is the hangeul offset
 fn hangeul_to_i32(ch: char) -> i32 {
-    let result = ch as u32 - 12592;
+    let result = ch as u32; //- 12592;
     println!("Character {}: {}", ch, result);
 
     result as i32

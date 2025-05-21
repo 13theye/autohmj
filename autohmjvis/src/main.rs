@@ -3,7 +3,7 @@
 // auto-hunminjeongak server and visualizer
 //
 
-use nannou::{prelude::*, text::*};
+use nannou::{prelude::*, text::*, wgpu::TextureReshaper};
 use nnpipe::*;
 use std::{
     collections::HashMap,
@@ -32,7 +32,7 @@ struct Model {
     translate: TranslationService,
     ai: GemmaService,
 
-    // View components
+    // Text Grids
     grids: Vec<TextGrid>,
 
     // WebSockets for client
@@ -43,19 +43,19 @@ struct Model {
     korean_font: Font,
     latin_font: Font,
 
-    // Nannou API
+    // Nannou API and rendering pipeline
     draw: nannou::Draw,
-    draw_renderer: nannou::draw::Renderer,
+    rendering: Nnpipe,
+    main_window_id: WindowId,
 
-    texture_main: wgpu::Texture,
-    texture_reshaper_main: wgpu::TextureReshaper,
-    post_processing: Nnpipe,
+    // Window's texture reshaper
+    window_reshaper: TextureReshaper,
 
     // FPS
     fps: Fps,
 
     // When on, displays more verbose messages in terminal
-    verbose: bool,
+    debug: bool,
 }
 
 fn model(app: &App) -> Model {
@@ -114,48 +114,15 @@ fn model(app: &App) -> Model {
     let main_window = app.window(main_window_id).unwrap();
 
     // Set up render texture
-    let device = main_window.device();
     let draw = nannou::Draw::new();
-    let texture_main = wgpu::TextureBuilder::new()
-        .size([
-            config.rendering_main.texture_width,
-            config.rendering_main.texture_height,
-        ])
-        // Our texture will be used as the RENDER_ATTACHMENT for our `Draw` render pass.
-        // It will also be SAMPLED by the `TextureCapturer` and `TextureResizer`.
-        .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING)
-        // Use nannou's default multisampling sample count.
-        .sample_count(config.rendering_main.texture_samples)
-        // Use a spacious 16-bit linear sRGBA format suitable for high quality drawing: Rgba16Float
-        // Use 8-bit for standard quality and better perforamnce: Rgba8Unorm Rgb10a2Unorm
-        .format(wgpu::TextureFormat::Rgba16Float)
-        // Build
-        .build(device);
-
-    // Set up rendering pipeline
-    let draw_renderer = nannou::draw::RendererBuilder::new()
-        .build_from_texture_descriptor(device, texture_main.descriptor());
-    let sample_count = main_window.msaa_samples();
-    let post_processing = Nnpipe::new(
+    let device = main_window.device();
+    let rendering = Nnpipe::new(
         device,
         config.rendering_main.texture_width,
         config.rendering_main.texture_height,
         config.rendering_main.texture_samples,
     );
-
-    // Create the texture reshaper for on-screen display
-    let texture_view_main = texture_main.view().build();
-    let texture_main_sample_count = texture_main.sample_count();
-    let texture_main_sample_type = texture_main.sample_type();
-    let dst_format = Frame::TEXTURE_FORMAT;
-    let texture_reshaper_main = wgpu::TextureReshaper::new(
-        device,
-        &texture_view_main,
-        texture_main_sample_count,
-        texture_main_sample_type,
-        sample_count,
-        dst_format,
-    );
+    let window_reshaper = rendering.create_reshaper_for_post_processed(device, &main_window);
 
     // Set up Text display style
     let text_layout_builder = nannou::text::layout::Builder::default();
@@ -190,18 +157,17 @@ fn model(app: &App) -> Model {
         latin_font,
 
         draw,
-        draw_renderer,
-        texture_main,
-        texture_reshaper_main,
+        window_reshaper,
+        main_window_id,
 
         server,
         connections,
 
-        post_processing,
+        rendering,
 
         fps: Fps::default(),
 
-        verbose: false,
+        debug: false,
     }
 }
 
@@ -216,9 +182,8 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     model.fps.last_update = now;
 
     // FPS update
-    if model.verbose {
+    if model.debug {
         model.fps.update(app.time, dt);
-        draw_debug(app, model);
     }
 
     // Handle the background
@@ -242,13 +207,22 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     render_and_post(app, model);
 }
 
-fn view(_app: &App, model: &Model, frame: Frame) {
-    //resize texture to screen
-    let mut encoder = frame.command_encoder();
+fn view(app: &App, model: &Model, frame: Frame) {
+    // Get the post-processed texture view
+    let _post_processed_view = model.rendering.get_post_processed_view();
 
+    // Update reshaper if needed (could be cached in Model)
     model
-        .texture_reshaper_main
-        .encode_render_pass(frame.texture_view(), &mut encoder);
+        .rendering
+        .draw_to_frame(&model.window_reshaper, &frame);
+
+    // Handle FPS and origin display
+    if model.debug {
+        draw_debug(app, model);
+
+        // Then draw UI over it
+        let _ = model.draw.to_frame(app, &frame);
+    }
 }
 
 // ****************************** View functions ***********************************
@@ -279,22 +253,16 @@ fn init_three_grids(
     let width = rect.w();
     let height = rect.h();
 
+    let font_size = grid_config.font_size_text;
+    let cols = grid_config.cols;
+
+    let margin = grid_config.left_right_margin as f32;
+    let column_width = (font_size * 2 * cols as u32) as f32;
+
     // Define three columns
-    let column_width = width / 4.0;
-    let left_right_margin = grid_config.left_right_margin as f32;
-    let left_col = Rect::from_x_y_w_h(
-        rect.left() + column_width / 2.0 + left_right_margin,
-        0.0,
-        column_width,
-        height,
-    );
     let center_col = Rect::from_x_y_w_h(0.0, 0.0, column_width, height);
-    let right_col = Rect::from_x_y_w_h(
-        rect.right() - column_width / 2.0 - left_right_margin,
-        0.0,
-        column_width,
-        height,
-    );
+    let left_col = Rect::from_x_y_w_h(-(column_width + margin), 0.0, column_width, height);
+    let right_col = Rect::from_x_y_w_h(column_width + margin, 0.0, column_width, height);
 
     let human_grid = TextGrid::new(
         "Human",
@@ -332,7 +300,7 @@ fn init_three_grids(
         speed_config,
     );
 
-    vec![human_grid, gemma1_grid, gemma2_grid]
+    vec![gemma1_grid, human_grid, gemma2_grid]
 }
 
 // ****************************** Controller functions ******************************
@@ -368,15 +336,9 @@ fn render_and_post(app: &App, model: &mut Model) {
     let device = window.device();
     let queue = window.queue();
 
-    // Process the scene with post-processing
-    let texture_view = model.texture_main.view().build();
-    model.post_processing.process(
-        device,
-        queue,
-        &texture_view,
-        &mut model.draw_renderer,
-        &model.draw,
-    );
+    // Render the game to texture and post-process
+    model.rendering.render_scene(device, queue, &model.draw);
+    model.rendering.post_process(device, queue);
 }
 
 // ************************ FPS and debug display  *************************************
@@ -434,24 +396,22 @@ impl Fps {
 
 fn draw_debug(app: &App, model: &Model) {
     let draw = &model.draw;
-    let rect = app.main_window().inner_size_points();
+    let rect = app.window(model.main_window_id).unwrap().rect();
 
     // Draw (+,+) axes
     draw.line()
-        .points(pt2(0.0, 0.0), pt2(50.0, 0.0))
+        .points(pt2(0.0, 0.0), pt2(25.0, 0.0))
         .color(RED)
         .stroke_weight(1.0);
     draw.line()
-        .points(pt2(0.0, 0.0), pt2(0.0, 50.0))
+        .points(pt2(0.0, 0.0), pt2(0.0, 25.0))
         .color(BLUE)
         .stroke_weight(1.0);
 
     // Draw rect bounds
-    model
-        .draw
-        .rect()
+    draw.rect()
         .xy(pt2(0.0, 0.0))
-        .wh(pt2(rect.0, rect.1))
+        .wh(pt2(rect.w(), rect.h()))
         .stroke(rgba(0.5, 1.0, 0.5, 0.5)) // Green outline
         .stroke_weight(2.0)
         .no_fill();
@@ -461,7 +421,7 @@ fn draw_debug(app: &App, model: &Model) {
         "FPS: {:.1}\nTranslation: {:?}",
         model.fps.fps, model.translate.translation_type
     ))
-    .x_y(rect.0 / 2.0 - 100.0, rect.1 / 2.0 - 30.0)
+    .x_y(rect.w() / 2.0 - 100.0, rect.h() / 2.0 - 30.0)
     .color(RED)
     .font_size(10);
 }
@@ -470,17 +430,32 @@ fn draw_debug(app: &App, model: &Model) {
 
 fn key_pressed(app: &App, model: &mut Model, key: Key) {
     match key {
+        Key::Key0 => {
+            model.grids[0].sequencer.send = !model.grids[0].sequencer.send;
+            println!("Grid 0 send OSC: {}", model.grids[0].sequencer.send);
+        }
         Key::Key1 => {
-            model.translate.set_to_korean();
+            model.grids[1].sequencer.send = !model.grids[1].sequencer.send;
+            println!("Grid 1 send OSC: {}", model.grids[1].sequencer.send);
         }
         Key::Key2 => {
-            model.translate.set_to_english();
+            model.grids[2].sequencer.send = !model.grids[2].sequencer.send;
+            println!("Grid 2 send OSC: {}", model.grids[2].sequencer.send);
         }
-        Key::Key3 => {
+        Key::Key5 => {
+            model.translate.set_to_korean();
+            println!("Translation set to Korean");
+        }
+        Key::Key6 => {
+            model.translate.set_to_english();
+            println!("Translation set to English");
+        }
+        Key::Key7 => {
             model.translate.set_to_french();
+            println!("Translation set to French");
         }
         Key::P => {
-            model.verbose = !model.verbose;
+            model.debug = !model.debug;
             model.fps.start(app.time);
         }
         Key::Escape => {
