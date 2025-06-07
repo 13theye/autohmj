@@ -79,14 +79,6 @@ impl Sequencer {
     }
 
     fn send_commands(&self, chars: Vec<char>) {
-        // Make the id work with the Max patch
-        let max_id = match self.id.as_str() {
-            "Uri" => 0,
-            "Human" => 1,
-            "Ani" => 2,
-            _ => 3,
-        };
-
         let length = chars.len();
 
         // if chars vec is invalid, return early
@@ -99,8 +91,10 @@ impl Sequencer {
             return;
         }
 
+        let id = self.id.as_str();
+
         // send the num_letters message
-        self.osc_sender.send_num_letters(max_id, length as i32);
+        //self.osc_sender.send_num_letters(max_id, length as i32);
 
         // the length of the Vec is how many jamo are in the character.
         // send the seq message
@@ -108,19 +102,15 @@ impl Sequencer {
             0 => {}
             1 => {
                 self.osc_sender
-                    .send_seq(max_id, hangeul_to_i32(chars[0]), -1, 0);
+                    .send_seq(id, hangeul_to_i32(chars[0]), -1, 0);
             }
             2 => {
-                self.osc_sender.send_seq(
-                    max_id,
-                    hangeul_to_i32(chars[0]),
-                    hangeul_to_i32(chars[1]),
-                    0,
-                );
+                self.osc_sender
+                    .send_seq(id, hangeul_to_i32(chars[0]), hangeul_to_i32(chars[1]), 0);
             }
             _ => {
                 self.osc_sender.send_seq(
-                    max_id,
+                    id,
                     hangeul_to_i32(chars[0]),
                     hangeul_to_i32(chars[1]),
                     hangeul_to_i32(chars[2]),

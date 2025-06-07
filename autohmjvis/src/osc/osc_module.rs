@@ -41,10 +41,10 @@ impl OscSender {
         })
     }
 
-    pub fn send_seq(&self, id: i32, choseong: i32, jungseong: i32, jeongseong: i32) {
+    pub fn send_seq(&self, id: &str, choseong: i32, jungseong: i32, jeongseong: i32) {
         let addr = "/hunmin/seq".to_string();
         let args = vec![
-            osc::Type::Int(id),
+            osc::Type::String(id.to_string()),
             osc::Type::Int(choseong),
             osc::Type::Int(jungseong),
             osc::Type::Int(jeongseong),
@@ -54,9 +54,12 @@ impl OscSender {
             .ok();
     }
 
-    pub fn send_num_letters(&self, id: i32, num_letters: i32) {
+    pub fn send_num_letters(&self, id: &str, num_letters: i32) {
         let addr = "/hunmin/numLetters".to_string();
-        let args = vec![osc::Type::Int(id), osc::Type::Int(num_letters)];
+        let args = vec![
+            osc::Type::String(id.to_string()),
+            osc::Type::Int(num_letters),
+        ];
         self.sender
             .send((addr, args), (self.target_addr.as_str(), self.target_port))
             .ok();

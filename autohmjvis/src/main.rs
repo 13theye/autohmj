@@ -95,7 +95,9 @@ fn model(app: &App) -> Model {
     // Assumes "assets/avernir4.ttf" exists relative to the executable
     // or relative to the project root if running with `cargo run`
 
-    let font_path = assets.join("avenir4.ttf");
+    //let font_path = assets.join("avenir4.ttf");
+    let font_path = assets.join("gulim.ttf");
+
     let font_bytes = fs::read(&font_path)
         .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
     let latin_font = Font::from_bytes(font_bytes)
@@ -233,7 +235,8 @@ fn update_grids(app: &App, model: &mut Model) {
             &model.draw,
             &model.text_layout,
             &model.korean_font,
-            &model.latin_font,
+            //&model.latin_font,
+            &model.korean_font,
             &model.translate.translation_type,
         );
     }
