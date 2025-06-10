@@ -11,6 +11,17 @@ target_port = 8000
 [speed]
 bpm = 160
 
+[audience_window]
+# The size of the monitoring window.
+# Currently scaling to 1/2 of texture resolution
+width = 1920
+height = 1080
+
+[performer_window]
+# The size of the performer window.
+width = 1440
+height = 810
+
 [grid]
 font_size_text = 50
 font_size_translation = 40
@@ -37,12 +48,6 @@ texture_height = 2160
 # Please don't change these
 texture_samples = 1
 arc_resolution = 25
-
-[main_window]
-# The size of the monitoring window.
-# Currently scaling to 1/2 of texture resolution
-width = 1920
-height = 1080
 
 
 [frame_recorder]

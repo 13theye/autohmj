@@ -44,12 +44,18 @@ struct Model {
     latin_font: Font,
 
     // Nannou API and rendering pipeline
-    draw: nannou::Draw,
     rendering: Nnpipe,
-    main_window_id: WindowId,
+
+    // Draws
+    draw: nannou::Draw,
+    audience_draw: nannou::Draw,
+    performer_draw: nannou::Draw,
 
     // Window's texture reshaper
-    window_reshaper: TextureReshaper,
+    audience_window_id: WindowId,
+    performer_window_id: WindowId,
+    audience_reshaper: TextureReshaper,
+    performer_reshaper: TextureReshaper,
 
     // FPS
     fps: Fps,
@@ -104,27 +110,61 @@ fn model(app: &App) -> Model {
         .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
 
     // Create main output window
-    let main_window_id = app
+    let audience_window_id = app
         .new_window()
         .title("Auto-훈민정음 0.1.0")
-        .size(config.main_window.width, config.main_window.height)
+        .size(config.audience_window.width, config.audience_window.height)
         .msaa_samples(1)
-        .view(view)
+        .view(audience_view)
+        .build()
+        .unwrap();
+
+    let performer_window_id = app
+        .new_window()
+        .title("Auto-훈민정음 0.1.0 Performer")
+        .size(
+            config.performer_window.width,
+            config.performer_window.height,
+        )
+        .msaa_samples(1)
+        .view(performer_view)
         .key_pressed(key_pressed)
         .build()
         .unwrap();
-    let main_window = app.window(main_window_id).unwrap();
+
+    let Some(audience_window) = app.window(audience_window_id) else {
+        eprintln!("Audience window not found. Exiting app.");
+        std::process::exit(1);
+    };
+
+    let Some(performer_window) = app.window(performer_window_id) else {
+        eprintln!("Performer window not found. Exiting app.");
+        std::process::exit(1);
+    };
+    println!(
+        "Audience window scale factor: {}",
+        audience_window.scale_factor()
+    );
+
+    println!(
+        "Performer window scale factor: {}",
+        performer_window.scale_factor()
+    );
+    let audience_draw = nannou::Draw::new();
+    let performer_draw = nannou::Draw::new();
 
     // Set up render texture
     let draw = nannou::Draw::new();
-    let device = main_window.device();
+    let device = audience_window.device();
     let rendering = Nnpipe::new(
         device,
         config.rendering_main.texture_width,
         config.rendering_main.texture_height,
         config.rendering_main.texture_samples,
     );
-    let window_reshaper = rendering.create_reshaper_for_post_processed(device, &main_window);
+    let audience_reshaper = rendering.create_reshaper_for_post_processed(device, &audience_window);
+    let performer_reshaper =
+        rendering.create_reshaper_for_post_processed(device, &performer_window);
 
     // Set up Text display style
     let text_layout_builder = nannou::text::layout::Builder::default();
@@ -158,9 +198,15 @@ fn model(app: &App) -> Model {
         korean_font,
         latin_font,
 
+        audience_window_id,
+        performer_window_id,
+
+        audience_reshaper,
+        performer_reshaper,
+
         draw,
-        window_reshaper,
-        main_window_id,
+        audience_draw,
+        performer_draw,
 
         server,
         connections,
@@ -209,14 +255,14 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     render_and_post(app, model);
 }
 
-fn view(app: &App, model: &Model, frame: Frame) {
+fn performer_view(app: &App, model: &Model, frame: Frame) {
     // Get the post-processed texture view
     let _post_processed_view = model.rendering.get_post_processed_view();
 
     // Update reshaper if needed (could be cached in Model)
     model
         .rendering
-        .draw_to_frame(&model.window_reshaper, &frame);
+        .draw_to_frame(&model.performer_reshaper, &frame);
 
     // Handle FPS and origin display
     if model.debug {
@@ -225,6 +271,16 @@ fn view(app: &App, model: &Model, frame: Frame) {
         // Then draw UI over it
         let _ = model.draw.to_frame(app, &frame);
     }
+}
+
+fn audience_view(app: &App, model: &Model, frame: Frame) {
+    // Get the post-processed texture view
+    let _post_processed_view = model.rendering.get_post_processed_view();
+
+    // Update reshaper if needed (could be cached in Model)
+    model
+        .rendering
+        .draw_to_frame(&model.audience_reshaper, &frame);
 }
 
 // ****************************** View functions ***********************************
@@ -398,8 +454,8 @@ impl Fps {
 }
 
 fn draw_debug(app: &App, model: &Model) {
-    let draw = &model.draw;
-    let rect = app.window(model.main_window_id).unwrap().rect();
+    let draw = &model.performer_draw;
+    let rect = app.window(model.performer_window_id).unwrap().rect();
 
     // Draw (+,+) axes
     draw.line()

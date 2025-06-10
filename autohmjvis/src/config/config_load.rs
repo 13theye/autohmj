@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 pub struct Config {
     pub frame_recorder: FrameRecorderConfig,
     pub grid: GridConfig,
-    pub main_window: MainWindowConfig,
+    pub audience_window: AudienceWindowConfig,
+    pub performer_window: PerformerWindowConfig,
     pub osc_send: OscSendConfig,
     pub paths: PathConfig,
     pub rendering_main: RenderMainConfig,

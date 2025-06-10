@@ -27,7 +27,13 @@ pub struct GridConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct MainWindowConfig {
+pub struct AudienceWindowConfig {
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PerformerWindowConfig {
     pub width: u32,
     pub height: u32,
 }

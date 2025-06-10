@@ -100,7 +100,7 @@ impl TextGrid {
         let origin_x = column.x() - col_width / 2.0 + cell_width / 2.0;
 
         let base_color = rgba(0.71, 0.71, 1.0, 1.0);
-        let translation_color = rgba(0.7, 0.7, 0.4, 1.0);
+        let translation_color = rgba(0.0, 0.85, 0.0, 1.0);
 
         let convo_rx = events.convo.subscribe();
         let translation_rx = events.translation.subscribe();
@@ -445,7 +445,7 @@ impl TextGrid {
                     alt_font
                 };
 
-                let translation_text = format!("({})", translation.trim());
+                let translation_text = format!("- {}", translation.trim());
 
                 draw.text(&translation_text)
                     .layout(text_layout)
