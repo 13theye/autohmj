@@ -1,14 +1,14 @@
-// src/control/controls.rs
+// src/control/UISettings.rs
 //
-// controls for the application
+// Settings for the application as controlled by UI
 
-pub struct Controls {
+pub struct Settings {
     pub send_osc_left: bool,
     pub send_osc_right: bool,
     pub send_osc_human: bool,
 }
 
-impl Controls {
+impl Settings {
     pub fn new() -> Self {
         Self {
             send_osc_left: true,
@@ -18,7 +18,7 @@ impl Controls {
     }
 }
 
-impl Default for Controls {
+impl Default for Settings {
     fn default() -> Self {
         Self::new()
     }

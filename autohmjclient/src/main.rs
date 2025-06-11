@@ -9,8 +9,8 @@ use eframe::{egui, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
 use std::collections::BTreeMap;
 
-use autohmjclient::{client::HMJClient, control::Controls};
-use autohmjcommon::{Conversation, ConvoWrapper, HMJMessage};
+use autohmjclient::{client::HMJClient, control::Settings};
+use autohmjcommon::{CommandMessage, Conversation, ConvoWrapper, HMJMessageWrapper};
 
 // The application state for the input-only window
 struct Model {
@@ -29,8 +29,8 @@ struct Model {
     client: HMJClient,
     client_id: String,
 
-    // Controls
-    controls: Controls,
+    // Settings for the vis
+    settings: Settings,
 }
 
 impl Model {
@@ -51,7 +51,7 @@ impl Model {
             client,
             client_id: client_id.to_owned(),
 
-            controls: Controls::default(),
+            settings: Settings::default(),
         }
     }
 
@@ -68,6 +68,16 @@ impl Model {
             fill: egui::Color32::BLACK,
             ..Default::default()
         };
+
+        // UI Settings
+        let mut osc_left_changed = false;
+        let mut osc_right_changed = false;
+        let mut osc_human_changed = false;
+
+        // AI Button clicked
+        let mut ai_left_clicked = false;
+        let mut ai_right_clicked = false;
+        let mut ai_both_clicked = false;
 
         // Build the UI
         egui::TopBottomPanel::bottom("input_panel")
@@ -116,9 +126,10 @@ impl Model {
                             && ctx.input(|i| i.key_pressed(egui::Key::Enter))
                         {
                             // send commit to server
-                            let commit = HMJMessage {
+                            let commit = HMJMessageWrapper {
                                 author: self.client_id.to_owned(),
-                                message: self.input_text.to_owned() + "\n",
+                                message: Some(self.input_text.to_owned() + "\n"),
+                                command: None,
                                 cursor_position: self.cursor_position,
                             };
                             self.client.send(commit);
@@ -145,11 +156,15 @@ impl Model {
                             ui.horizontal(|ui| {
                                 ui.vertical(|ui| {
                                     ui.set_min_width(70.0);
-                                    ui.add(egui::Button::new("Left"));
+                                    ai_left_clicked = ui.add(egui::Button::new("Left")).clicked();
                                 });
                                 ui.vertical(|ui| {
                                     ui.set_min_width(70.0);
-                                    ui.add(egui::Button::new("Right"));
+                                    ai_right_clicked = ui.add(egui::Button::new("Right")).clicked();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    ai_both_clicked = ui.add(egui::Button::new("Both")).clicked();
                                 });
                                 ui.vertical(|ui| {
                                     ui.set_min_width(70.0);
@@ -171,36 +186,106 @@ impl Model {
                             ui.horizontal(|ui| {
                                 ui.vertical(|ui| {
                                     ui.set_min_width(70.0);
-                                    ui.add(egui::Checkbox::new(
-                                        &mut self.controls.send_osc_left,
-                                        egui::RichText::new("Left")
-                                            .strong()
-                                            .color(egui::Color32::from_rgb(150, 150, 150)),
-                                    ));
+                                    osc_left_changed = ui
+                                        .add(egui::Checkbox::new(
+                                            &mut self.settings.send_osc_left,
+                                            egui::RichText::new("Left")
+                                                .strong()
+                                                .color(egui::Color32::from_rgb(150, 150, 150)),
+                                        ))
+                                        .changed();
                                 });
                                 ui.vertical(|ui| {
                                     ui.set_min_width(70.0);
-                                    ui.add(egui::Checkbox::new(
-                                        &mut self.controls.send_osc_human,
-                                        egui::RichText::new("Human")
-                                            .strong()
-                                            .color(egui::Color32::from_rgb(150, 150, 150)),
-                                    ));
+                                    osc_human_changed = ui
+                                        .add(egui::Checkbox::new(
+                                            &mut self.settings.send_osc_human,
+                                            egui::RichText::new("Human")
+                                                .strong()
+                                                .color(egui::Color32::from_rgb(150, 150, 150)),
+                                        ))
+                                        .changed();
                                 });
                                 ui.vertical(|ui| {
                                     ui.set_min_width(70.0);
-                                    ui.add(egui::Checkbox::new(
-                                        &mut self.controls.send_osc_right,
-                                        egui::RichText::new("Right")
-                                            .strong()
-                                            .color(egui::Color32::from_rgb(150, 150, 150)),
-                                    ));
+                                    osc_right_changed = ui
+                                        .add(egui::Checkbox::new(
+                                            &mut self.settings.send_osc_right,
+                                            egui::RichText::new("Right")
+                                                .strong()
+                                                .color(egui::Color32::from_rgb(150, 150, 150)),
+                                        ))
+                                        .changed();
                                 });
                             }); // ui horizontal for Send OSC
                         }); // ui vertical for label and buttons
                     }); // ui horizontal for label and buttons
                 }); // outermost ui vertical
             }); // ui topbottompanel
+
+        // If any of the OSC settings changed, send a message to the server
+        if osc_left_changed {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::OscLeftSetting(self.settings.send_osc_left)),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if osc_right_changed {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::OscRightSetting(
+                    self.settings.send_osc_right,
+                )),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+        if osc_human_changed {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::OscHumanSetting(
+                    self.settings.send_osc_human,
+                )),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if ai_left_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::AISend("Left".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if ai_right_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::AISend("Right".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if ai_both_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::AISend("Both".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
     }
 
     fn build_conversation_frame(&mut self, ctx: &egui::Context) {
@@ -311,9 +396,10 @@ impl eframe::App for Model {
         self.build_conversation_frame(ctx);
 
         // After the UI is built, stream the current text live:
-        let payload = HMJMessage {
+        let payload = HMJMessageWrapper {
             author: self.client_id.to_owned(),
-            message: self.input_text.to_owned(),
+            message: Some(self.input_text.to_owned()),
+            command: None,
             cursor_position: self.cursor_position,
         };
         self.client.send(payload);
