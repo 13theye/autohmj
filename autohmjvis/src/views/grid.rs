@@ -190,7 +190,7 @@ impl TextGrid {
                 self.latest = None;
             }
 
-            let human_msg = human_msg.trim();
+            //let human_msg = human_msg.trim(); // We're keeping whitespaces now
             let new_chars = self.character_entities_from(human_msg);
 
             // Don't replace if unchanged
