@@ -16,6 +16,8 @@ use autohmjcommon::{Conversation, ConvoWrapper, HMJMessage};
 struct Model {
     // input from the user
     input_text: String,
+    // cursor position
+    cursor_position: Option<usize>,
     // History of submitted lines
     conversation: Conversation,
     // Flag to request focus next frame
@@ -41,6 +43,7 @@ impl Model {
 
         Self {
             input_text: String::new(),
+            cursor_position: None,
             conversation: BTreeMap::new(),
             input_focus_next_frame: true,
             input_id: egui::Id::new("input_field"),
@@ -80,14 +83,22 @@ impl Model {
                                 .size(20.0)
                                 .color(egui::Color32::WHITE),
                         );
-                        let response = ui.add(
-                            egui::TextEdit::singleline(&mut self.input_text)
-                                .id_source(self.input_id)
-                                .font(egui::FontId::new(20.0, FontFamily::Monospace))
-                                .desired_width(f32::INFINITY)
-                                .frame(false)
-                                .text_color(egui::Color32::WHITE),
-                        );
+                        let text_edit_output = egui::TextEdit::singleline(&mut self.input_text)
+                            .id_source(self.input_id)
+                            .font(egui::FontId::new(20.0, FontFamily::Monospace))
+                            .desired_width(f32::INFINITY)
+                            .frame(false)
+                            .text_color(egui::Color32::WHITE)
+                            .show(ui);
+
+                        let response = text_edit_output.response;
+
+                        // Extract cursor position
+                        if let Some(cursor_range) = text_edit_output.cursor_range {
+                            // Get the cursor position (use the primary cursor position)
+                            let cursor_pos = cursor_range.primary.ccursor.index;
+                            self.cursor_position = Some(cursor_pos);
+                        }
 
                         // handle focus
                         if self.input_focus_next_frame {
@@ -105,10 +116,11 @@ impl Model {
                             && ctx.input(|i| i.key_pressed(egui::Key::Enter))
                         {
                             // send commit to server
-                            let commit = HMJMessage(
-                                self.client_id.to_owned(),
-                                self.input_text.trim().to_owned() + "\n",
-                            );
+                            let commit = HMJMessage {
+                                author: self.client_id.to_owned(),
+                                message: self.input_text.to_owned() + "\n",
+                                cursor_position: self.cursor_position,
+                            };
                             self.client.send(commit);
                             // clear the input field
                             self.input_text.clear();
@@ -249,7 +261,7 @@ impl Model {
                                 ui.vertical(|ui| {
                                     // Original message
                                     ui.label(
-                                        egui::RichText::new(entry.message.trim_end())
+                                        egui::RichText::new(entry.message.to_owned())
                                             .monospace()
                                             .size(20.0)
                                             .color(egui::Color32::WHITE),
@@ -299,7 +311,11 @@ impl eframe::App for Model {
         self.build_conversation_frame(ctx);
 
         // After the UI is built, stream the current text live:
-        let payload = HMJMessage(self.client_id.to_owned(), self.input_text.to_owned());
+        let payload = HMJMessage {
+            author: self.client_id.to_owned(),
+            message: self.input_text.to_owned(),
+            cursor_position: self.cursor_position,
+        };
         self.client.send(payload);
     }
 }
