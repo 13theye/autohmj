@@ -25,7 +25,7 @@ const ALLOWED_PUNCTUATION: &[char] = &['?', '!', ':', ';', ',', '"', '\''];
 pub struct CharacterEntity {
     pub character: char,    // The complete character
     pub display_char: char, // The character currently being displayed (i.e. partial Hangeul)
-    position: Point2,
+    pub position: Point2,
     color: Rgba,
     font_size: u32,
     pub is_visible: bool,
@@ -39,10 +39,10 @@ pub struct CharacterEntity {
 
 // Handles character positioning
 pub struct TextGrid {
-    id: String,                                        // author
+    pub id: String,                                    // author
     is_human: bool,                                    // is this grid for a human?
     latest: Option<(usize, ConvoItem)>,                // the latest (key, message)
-    content_chars: Vec<CharacterEntity>,               // the latest message broken up into chars
+    pub content_chars: Vec<CharacterEntity>,           // the latest message broken up into chars
     connections: Arc<RwLock<HashMap<String, String>>>, // reference to model.connections
 
     // animation
@@ -57,13 +57,13 @@ pub struct TextGrid {
     clock: ClockService,
 
     // attributes
-    origin_x: f32,
-    message_y: f32,
+    pub origin_x: f32,  // left of the grid
+    pub message_y: f32, // top of the grid
     translation_y: f32,
-    cell_width: f32,
-    cell_height: f32,
-    rows: usize,
-    cols: usize,
+    pub cell_width: f32,
+    pub cell_height: f32,
+    pub rows: usize,
+    pub cols: usize,
     col_width: f32,
 
     // text style

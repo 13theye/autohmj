@@ -145,6 +145,7 @@ fn model(app: &App) -> Model {
         eprintln!("Performer window not found. Exiting app.");
         std::process::exit(1);
     };
+
     println!(
         "Audience window scale factor: {}",
         audience_window.scale_factor()
@@ -264,6 +265,9 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 }
 
 fn performer_view(app: &App, model: &Model, frame: Frame) {
+    // Clear the performer draw before starting
+    model.performer_draw.reset();
+
     // Get the post-processed texture view
     let _post_processed_view = model.rendering.get_post_processed_view();
 
@@ -277,11 +281,16 @@ fn performer_view(app: &App, model: &Model, frame: Frame) {
         model.fps.draw(&model.performer_draw);
     }
 
+    // Draw current cursor position
+    draw_human_cursor(app, model);
+
     // Then draw UI over it
     let _ = model.performer_draw.to_frame(app, &frame);
 }
 
 fn audience_view(app: &App, model: &Model, frame: Frame) {
+    model.audience_draw.reset();
+
     // Get the post-processed texture view
     let _post_processed_view = model.rendering.get_post_processed_view();
 
@@ -416,7 +425,7 @@ fn render_and_post(app: &App, model: &mut Model) {
     model.rendering.post_process(device, queue);
 }
 
-// ************************ FPS and debug display  *************************************
+// ************************ Performer HUD  *************************************
 struct Fps {
     pub last_update: Instant,
     pub fps: f32,
@@ -460,6 +469,77 @@ fn draw_debug(app: &App, model: &Model) {
         .stroke(rgba(0.5, 1.0, 0.5, 0.5)) // Green outline
         .stroke_weight(2.0)
         .no_fill();
+}
+
+fn draw_human_cursor(app: &App, model: &Model) {
+    let Some(grid) = model.grids.iter().find(|grid| grid.id == "Human") else {
+        println!("No human grid found");
+        return;
+    };
+
+    let Some(last_char) = grid.content_chars.last() else {
+        return;
+    };
+
+    let draw = &model.performer_draw;
+    let performer_rect = app.window(model.performer_window_id).unwrap().rect();
+
+    // scale grid dimensions to match window size
+    let scale_x = performer_rect.w() / model.rendering.width as f32;
+    let scale_y = performer_rect.h() / model.rendering.height as f32;
+
+    let origin_x = grid.origin_x * scale_x;
+    let message_y = grid.message_y * scale_y;
+    let rows = grid.rows;
+    let cols = grid.cols;
+
+    let cell_width = grid.cell_width * scale_x;
+    let cell_height = grid.cell_height * scale_y;
+
+    for row in 0..=rows {
+        draw.line()
+            .points(
+                pt2(
+                    origin_x - cell_width / 2.0,
+                    (message_y + cell_height / 2.0) - row as f32 * cell_height,
+                ),
+                pt2(
+                    (origin_x - cell_width / 2.0) + cols as f32 * cell_width,
+                    (message_y + cell_height / 2.0) - row as f32 * cell_height,
+                ),
+            )
+            .color(rgba(0.0, 0.3, 0.0, 1.0))
+            .stroke_weight(1.0);
+    }
+
+    for col in 0..=cols {
+        draw.line()
+            .points(
+                pt2(
+                    (origin_x - cell_width / 2.0) + col as f32 * cell_width,
+                    message_y + cell_height / 2.0,
+                ),
+                pt2(
+                    (origin_x - cell_width / 2.0) + col as f32 * cell_width,
+                    (message_y + cell_height / 2.0) - rows as f32 * cell_height,
+                ),
+            )
+            .color(rgba(0.0, 0.3, 0.0, 1.0))
+            .stroke_weight(1.0);
+    }
+
+    // scale the cursor position
+    let cursor_length = cell_width - 2.0;
+    let pos = last_char.position * pt2(scale_x, scale_y);
+
+    let start_point = pt2(pos.x - cursor_length / 2.0, pos.y - cell_height / 2.0);
+    let end_point = pt2(pos.x + cursor_length / 2.0, pos.y - cell_height / 2.0);
+
+    // Draw a horizontal cursor line
+    draw.line()
+        .points(start_point, end_point)
+        .color(rgba(1.0, 1.0, 1.0, 1.0))
+        .stroke_weight(2.0); // Made thicker for visibility
 }
 
 // ************************ Main window input  *************************************
