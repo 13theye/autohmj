@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 // Re-export Conversation Types
-pub use autohmjcommon::{Conversation, ConvoItem, ConvoWrapper, HMJMessage};
+pub use autohmjcommon::{Conversation, ConvoItem, ConvoWrapper, HMJMessageWrapper};
 
 // Maximum number of entries in the conversation history
 const MAX_HISTORY: usize = 100;

@@ -72,11 +72,19 @@ impl GemmaService {
 
     pub fn send(
         &mut self,
-        new_item: &ConvoItem,
+        gemma_persona: GemmaPersona,
+        new_item: Option<&ConvoItem>,
         conversation: &Conversation,
     ) -> Result<(), String> {
         // Determine who should speak next
-        let gemma_instance = self.instances.get(&self.next_instance()).unwrap();
+        //let gemma_instance = self.instances.get(&self.next_instance()).unwrap();
+
+        let Some(gemma_instance) = self.instances.get(&gemma_persona) else {
+            return Err(format!(
+                "No gemma instance found for persona: {:?}",
+                gemma_persona
+            ));
+        };
 
         // Clone the client, api key, model name
         let client = self.client.clone();
@@ -308,7 +316,7 @@ impl GemmaInstance {
     // generate request content to be sent to this instance
     pub fn generate_contents(
         &self,
-        new_item: &ConvoItem,
+        new_item: Option<&ConvoItem>,
         conversation: &Conversation,
         system_prompt: &str,
     ) -> Vec<RequestContent> {
@@ -343,13 +351,15 @@ impl GemmaInstance {
             });
         }
 
-        // Add current message
-        contents.push(RequestContent {
-            role: "user".to_owned(),
-            parts: vec![Part {
-                text: format!("{}: {}", new_item.author, new_item.message),
-            }],
-        });
+        if let Some(new_item) = new_item {
+            // Add current message
+            contents.push(RequestContent {
+                role: "user".to_owned(),
+                parts: vec![Part {
+                    text: format!("{}: {}", new_item.author, new_item.message),
+                }],
+            });
+        }
 
         contents
     }
@@ -368,7 +378,7 @@ pub struct GemmaResponse {
     pub message: String,
 }
 
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Hash, PartialEq, Eq, Debug)]
 pub enum GemmaPersona {
     Gemma1,
     Gemma2,

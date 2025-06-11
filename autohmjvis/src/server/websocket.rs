@@ -6,7 +6,7 @@
 
 use crate::{
     events::{ConvoEvent, EventBus},
-    models::HMJMessage,
+    models::HMJMessageWrapper,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -27,9 +27,9 @@ pub struct HMJServer {
     // Server configuration
     port: u16,
 
-    // Async task channel
-    message_tx: mpsc::Sender<HMJMessage>,
-    message_rx: mpsc::Receiver<HMJMessage>,
+    // Async task channel - messages
+    message_tx: mpsc::Sender<HMJMessageWrapper>,
+    message_rx: mpsc::Receiver<HMJMessageWrapper>,
 
     // Client broadcast channel
     broadcast_tx: broadcast::Sender<String>,
@@ -169,7 +169,7 @@ impl HMJServer {
     }
 
     /// Try to receive a message from clients (non-blocking)
-    pub fn try_recv(&mut self) -> Option<HMJMessage> {
+    pub fn try_recv_message(&mut self) -> Option<HMJMessageWrapper> {
         self.message_rx.try_recv().ok()
     }
 
@@ -235,7 +235,7 @@ async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
     clients: Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>,
-    message_tx: mpsc::Sender<HMJMessage>,
+    message_tx: mpsc::Sender<HMJMessageWrapper>,
     broadcast_tx: broadcast::Sender<String>,
     shutdown_rx: broadcast::Receiver<()>,
     reg_tx: mpsc::Sender<String>,
@@ -343,7 +343,7 @@ async fn handle_connection(
                                     };
 
                                     if !id.is_empty() {
-                                        match serde_json::from_str::<HMJMessage>(&text) {
+                                        match serde_json::from_str::<HMJMessageWrapper>(&text) {
                                             Ok(hmj_message) => {
                                                 if let Err(e) = message_tx.send(hmj_message).await {
                                                     eprintln!("Failed to send message to channel: {}", e);

@@ -7,7 +7,7 @@ use std::time::Instant;
 
 pub struct Sequencer {
     id: String,
-    pub send: bool,
+    pub is_sending: bool,
     beat_count: usize,
     last_clock_time: Instant,
     pub current_idx: usize, // this increments at the START OF BEAT, not after read.
@@ -20,7 +20,7 @@ impl Sequencer {
         let osc_sender = OscSender::new(osc_config).expect("Failed to create OSC Sender");
         Self {
             id: id.to_owned(),
-            send: true,
+            is_sending: true,
             beat_count: 0,
             last_clock_time: Instant::now(),
             current_idx: 0,
@@ -47,7 +47,8 @@ impl Sequencer {
             // punctuation that makes it here has been pre-filtered by the grid.
             // so we can just send it as is
             } else if ch.is_ascii_punctuation() {
-                self.send_commands(vec![ch]);
+                self.osc_sender
+                    .send_punctuation(self.id.as_str(), ch as i32);
             }
         }
     }
@@ -82,15 +83,15 @@ impl Sequencer {
     }
 
     fn send_commands(&self, chars: Vec<char>) {
+        // Don't send if the self flag is false
+        if !self.is_sending {
+            return;
+        }
+
         let length = chars.len();
 
         // if chars vec is invalid, return early
         if chars.is_empty() || length > 3 {
-            return;
-        }
-
-        // Don't send if the self flag is false
-        if !self.send {
             return;
         }
 

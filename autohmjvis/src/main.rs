@@ -16,9 +16,9 @@ use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig, GridConfig, OscSendConfig, SpeedConfig},
     events::EventBus,
     fps::FpsManager,
-    models::HMJMessage,
+    models::{CommandMessage, HMJMessageWrapper},
     server::HMJServer,
-    services::{ConversationService, GemmaService, TranslationService},
+    services::{ConversationService, GemmaPersona, GemmaService, TranslationService},
     views::{BackgroundManager, TextGrid},
 };
 
@@ -39,7 +39,7 @@ struct Model {
     // WebSockets for client
     server: HMJServer,
     connections: Arc<RwLock<HashMap<String, String>>>, // a shared reference to live input and cursor position
-    cursor_positions: HashMap<String, usize>,
+    cursor_positions: HashMap<String, usize>,          // the cursor position in the grid
 
     // Fonts
     korean_font: Font,
@@ -254,7 +254,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     model.server.update();
 
     // Receive incoming datagrams and update connections
-    receive_human_input(model);
+    receive_hmjmessage(model);
 
     // Process any new conversation items
     model.convo.update();
@@ -391,36 +391,94 @@ fn init_three_grids(
 
 // ****************************** Controller functions ******************************
 
-fn receive_human_input(model: &mut Model) {
+fn receive_hmjmessage(model: &mut Model) {
     // Receive WebSocket messages
-    while let Some(HMJMessage {
+    while let Some(HMJMessageWrapper {
         author,
         message,
+        command,
         cursor_position,
-    }) = model.server.try_recv()
+    }) = model.server.try_recv_message()
     {
-        // Update connections map for live display or finalize messages
-        if message.ends_with('\n') {
-            // Create convo item
-            let entry = ConversationService::new_item(&author, &message);
+        // Handle convo messages
+        if let Some(message) = message {
+            // Update connections map for live display or finalize messages
+            if message.ends_with('\n') {
+                // Create convo item
+                let entry = ConversationService::new_item(&author, &message);
 
-            // Send to next AI speaker
-            let _ = model.ai.send(&entry, model.convo.entries());
+                // Send to next AI speaker (now requires specific command)
+                //let _ = model.ai.send(&entry, model.convo.entries());
 
-            // Add message to conversation
-            model.convo.add(entry);
+                // Add message to conversation
+                model.convo.add(entry);
 
-            // Clear the buffer
-            model.connections.write().unwrap().remove(&author);
-        } else {
-            // Message is in progress
-            model
-                .connections
-                .write()
-                .unwrap()
-                .insert(author.to_owned(), message);
-            if let Some(cursor_position) = cursor_position {
-                model.cursor_positions.insert(author, cursor_position);
+                // Clear the buffer
+                model.connections.write().unwrap().remove(&author);
+            } else {
+                // Message is in progress
+                model
+                    .connections
+                    .write()
+                    .unwrap()
+                    .insert(author.to_owned(), message);
+                if let Some(cursor_position) = cursor_position {
+                    model.cursor_positions.insert(author, cursor_position);
+                }
+            }
+        }
+
+        // Handle command messages
+        if let Some(command) = command {
+            println!("Receive command: {:#?}", command);
+            match command {
+                CommandMessage::OscLeftSetting(setting) => {
+                    let Some(grid) = model.grids.iter_mut().find(|grid| grid.id == "Left") else {
+                        println!("No grid named Left");
+                        return;
+                    };
+                    println!("Setting Left OSC: {}", setting);
+                    grid.sequencer.is_sending = setting;
+                }
+                CommandMessage::OscHumanSetting(setting) => {
+                    let Some(grid) = model.grids.iter_mut().find(|grid| grid.id == "Human") else {
+                        println!("No grid named Human");
+                        return;
+                    };
+                    println!("Setting Human OSC: {}", setting);
+                    grid.sequencer.is_sending = setting;
+                }
+                CommandMessage::OscRightSetting(setting) => {
+                    let Some(grid) = model.grids.iter_mut().find(|grid| grid.id == "Right") else {
+                        println!("No grid named Right");
+                        return;
+                    };
+                    println!("Setting Right OSC: {}", setting);
+                    grid.sequencer.is_sending = setting;
+                }
+                CommandMessage::AISend(ai_id) => match ai_id.as_str() {
+                    "Left" => {
+                        let _ = model
+                            .ai
+                            .send(GemmaPersona::Gemma1, None, model.convo.entries());
+                    }
+                    "Right" => {
+                        let _ = model
+                            .ai
+                            .send(GemmaPersona::Gemma2, None, model.convo.entries());
+                    }
+                    "Both" => {
+                        let _ = model
+                            .ai
+                            .send(GemmaPersona::Gemma1, None, model.convo.entries());
+                        let _ = model
+                            .ai
+                            .send(GemmaPersona::Gemma2, None, model.convo.entries());
+                    }
+                    _ => {
+                        println!("Unknown AI ID: {}", ai_id);
+                    }
+                },
             }
         }
     }
@@ -574,16 +632,16 @@ fn draw_human_cursor(app: &App, model: &Model) {
 fn key_pressed(app: &App, model: &mut Model, key: Key) {
     match key {
         Key::Key0 => {
-            model.grids[0].sequencer.send = !model.grids[0].sequencer.send;
-            println!("Grid 0 send OSC: {}", model.grids[0].sequencer.send);
+            model.grids[0].sequencer.is_sending = !model.grids[0].sequencer.is_sending;
+            println!("Grid 0 send OSC: {}", model.grids[0].sequencer.is_sending);
         }
         Key::Key1 => {
-            model.grids[1].sequencer.send = !model.grids[1].sequencer.send;
-            println!("Grid 1 send OSC: {}", model.grids[1].sequencer.send);
+            model.grids[1].sequencer.is_sending = !model.grids[1].sequencer.is_sending;
+            println!("Grid 1 send OSC: {}", model.grids[1].sequencer.is_sending);
         }
         Key::Key2 => {
-            model.grids[2].sequencer.send = !model.grids[2].sequencer.send;
-            println!("Grid 2 send OSC: {}", model.grids[2].sequencer.send);
+            model.grids[2].sequencer.is_sending = !model.grids[2].sequencer.is_sending;
+            println!("Grid 2 send OSC: {}", model.grids[2].sequencer.is_sending);
         }
         Key::Key5 => {
             model.translate.set_to_korean();
