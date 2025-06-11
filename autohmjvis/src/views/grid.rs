@@ -468,7 +468,7 @@ impl TextGrid {
     }
 
     // Calculate the position of a character for a given grid coordinate
-    fn place_char_at(&self, row: usize, col: usize) -> Point2 {
+    pub fn place_char_at(&self, row: usize, col: usize) -> Point2 {
         pt2(
             self.origin_x + (col as f32 * self.cell_width),
             self.message_y - (row as f32 * self.cell_height),

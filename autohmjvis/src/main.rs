@@ -38,7 +38,8 @@ struct Model {
 
     // WebSockets for client
     server: HMJServer,
-    connections: Arc<RwLock<HashMap<String, String>>>, // a shared reference to live input
+    connections: Arc<RwLock<HashMap<String, String>>>, // a shared reference to live input and cursor position
+    cursor_positions: HashMap<String, usize>,
 
     // Fonts
     korean_font: Font,
@@ -223,6 +224,7 @@ fn model(app: &App) -> Model {
 
         server,
         connections,
+        cursor_positions: HashMap::new(),
 
         rendering,
 
@@ -391,11 +393,16 @@ fn init_three_grids(
 
 fn receive_human_input(model: &mut Model) {
     // Receive WebSocket messages
-    while let Some(HMJMessage(id, text)) = model.server.try_recv() {
+    while let Some(HMJMessage {
+        author,
+        message,
+        cursor_position,
+    }) = model.server.try_recv()
+    {
         // Update connections map for live display or finalize messages
-        if text.ends_with('\n') {
+        if message.ends_with('\n') {
             // Create convo item
-            let entry = ConversationService::new_item(&id, &text);
+            let entry = ConversationService::new_item(&author, &message);
 
             // Send to next AI speaker
             let _ = model.ai.send(&entry, model.convo.entries());
@@ -404,10 +411,17 @@ fn receive_human_input(model: &mut Model) {
             model.convo.add(entry);
 
             // Clear the buffer
-            model.connections.write().unwrap().remove(&id);
+            model.connections.write().unwrap().remove(&author);
         } else {
             // Message is in progress
-            model.connections.write().unwrap().insert(id, text);
+            model
+                .connections
+                .write()
+                .unwrap()
+                .insert(author.to_owned(), message);
+            if let Some(cursor_position) = cursor_position {
+                model.cursor_positions.insert(author, cursor_position);
+            }
         }
     }
 }
@@ -477,10 +491,6 @@ fn draw_human_cursor(app: &App, model: &Model) {
         return;
     };
 
-    let Some(last_char) = grid.content_chars.last() else {
-        return;
-    };
-
     let draw = &model.performer_draw;
     let performer_rect = app.window(model.performer_window_id).unwrap().rect();
 
@@ -528,12 +538,29 @@ fn draw_human_cursor(app: &App, model: &Model) {
             .stroke_weight(1.0);
     }
 
-    // scale the cursor position
-    let cursor_length = cell_width - 2.0;
-    let pos = last_char.position * pt2(scale_x, scale_y);
+    // scale & draw the cursor position
+    let Some(cursor_position) = model.cursor_positions.get(&grid.id) else {
+        return;
+    };
 
-    let start_point = pt2(pos.x - cursor_length / 2.0, pos.y - cell_height / 2.0);
-    let end_point = pt2(pos.x + cursor_length / 2.0, pos.y - cell_height / 2.0);
+    let cursor_grid_pos = (cursor_position / grid.cols, cursor_position % grid.cols);
+    let cursor_pos = grid.place_char_at(cursor_grid_pos.0, cursor_grid_pos.1);
+
+    let cell_width = grid.cell_width * scale_x;
+    let cell_height = grid.cell_height * scale_y;
+
+    let cursor_length = cell_width - 2.0;
+    let scaled_pos = cursor_pos * pt2(scale_x, scale_y);
+
+    // Use these for a horizontal cursor underneath
+    let start_point = pt2(
+        scaled_pos.x - cursor_length / 2.0,
+        scaled_pos.y - cell_height / 2.0,
+    );
+    let end_point = pt2(
+        scaled_pos.x + cursor_length / 2.0,
+        scaled_pos.y - cell_height / 2.0,
+    );
 
     // Draw a horizontal cursor line
     draw.line()
