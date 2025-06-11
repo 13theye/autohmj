@@ -17,6 +17,9 @@ use crate::{
     views::AnimationController,
 };
 
+// If punctuation is not on this list, it will be hidden from the grid
+const ALLOWED_PUNCTUATION: &[char] = &['?', '!', ':', ';', ',', '"', '\''];
+
 // Wraps display state information for a character
 #[derive(Clone, Debug, Default)]
 pub struct CharacterEntity {
@@ -488,9 +491,10 @@ impl TextGrid {
             }
 
             // Skip spaces and punctuation
+
             if
-            /*ch.is_whitespace() ||*/
-            ch.is_ascii_punctuation() {
+            //ch.is_whitespace() ||
+            ch.is_ascii_punctuation() && !ALLOWED_PUNCTUATION.contains(&ch) {
                 continue;
             }
 
