@@ -9,7 +9,7 @@ use eframe::{egui, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
 use std::collections::BTreeMap;
 
-use autohmjclient::client::HMJClient;
+use autohmjclient::{client::HMJClient, control::Controls};
 use autohmjcommon::{Conversation, ConvoWrapper, HMJMessage};
 
 // The application state for the input-only window
@@ -26,6 +26,9 @@ struct Model {
     // WebSocket Client
     client: HMJClient,
     client_id: String,
+
+    // Controls
+    controls: Controls,
 }
 
 impl Model {
@@ -44,6 +47,8 @@ impl Model {
 
             client,
             client_id: client_id.to_owned(),
+
+            controls: Controls::default(),
         }
     }
 
@@ -114,9 +119,76 @@ impl Model {
                               let payload = format!("{}:{}", self.client_id, self.input_text);
                               self.client.send(payload);
                           }*/
-                    });
-                });
-            });
+                    }); // ui horizontal
+                    ui.add_space(20.0);
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(100.0);
+                            ui.label(
+                                egui::RichText::new("Send to AI:")
+                                    .color(egui::Color32::from_rgb(150, 150, 150)),
+                            );
+                        });
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    ui.add(egui::Button::new("Left"));
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    ui.add(egui::Button::new("Right"));
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    ui.add(egui::Button::new("Smart..?"));
+                                });
+                            }); // ui horizontal for Send to AI
+                        }); // ui vertical for label and buttons
+                    }); // ui horizontal for label and buttons
+                    ui.add_space(7.0);
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(100.0);
+                            ui.label(
+                                egui::RichText::new("OSC Sending:")
+                                    .color(egui::Color32::from_rgb(150, 150, 150)),
+                            );
+                        });
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    ui.add(egui::Checkbox::new(
+                                        &mut self.controls.send_osc_left,
+                                        egui::RichText::new("Left")
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(150, 150, 150)),
+                                    ));
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    ui.add(egui::Checkbox::new(
+                                        &mut self.controls.send_osc_human,
+                                        egui::RichText::new("Human")
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(150, 150, 150)),
+                                    ));
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    ui.add(egui::Checkbox::new(
+                                        &mut self.controls.send_osc_right,
+                                        egui::RichText::new("Right")
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(150, 150, 150)),
+                                    ));
+                                });
+                            }); // ui horizontal for Send OSC
+                        }); // ui vertical for label and buttons
+                    }); // ui horizontal for label and buttons
+                }); // outermost ui vertical
+            }); // ui topbottompanel
     }
 
     fn build_conversation_frame(&mut self, ctx: &egui::Context) {
@@ -282,5 +354,6 @@ fn set_styles(cc: &CreationContext) {
         TextStyle::Monospace,
         FontId::new(20.0, FontFamily::Monospace),
     );
+    style.visuals.override_text_color = Some(egui::Color32::from_rgb(150, 150, 150));
     cc.egui_ctx.set_style(style);
 }
