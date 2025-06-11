@@ -41,11 +41,14 @@ impl Sequencer {
         // process character
         if let Some(ch) = self.get_character() {
             // do nothing if not hangeul
-            if !hangeul::is_hangeul(ch as u32) {
-                return;
-            }
+            if hangeul::is_hangeul(ch as u32) {
+                self.send_commands(decompose_character(ch));
 
-            self.send_commands(decompose_character(ch));
+            // punctuation that makes it here has been pre-filtered by the grid.
+            // so we can just send it as is
+            } else if ch.is_ascii_punctuation() {
+                self.send_commands(vec![ch]);
+            }
         }
     }
 
