@@ -15,6 +15,7 @@ use std::{
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig, GridConfig, OscSendConfig, SpeedConfig},
     events::EventBus,
+    fps::FpsManager,
     models::HMJMessage,
     server::HMJServer,
     services::{ConversationService, GemmaService, TranslationService},
@@ -58,10 +59,13 @@ struct Model {
     performer_reshaper: TextureReshaper,
 
     // FPS
-    fps: Fps,
+    fps: FpsManager,
 
-    // When on, displays more verbose messages in terminal
-    debug: bool,
+    // When true, displays more verbose messages in terminal
+    show_debug: bool,
+
+    // When true, displays FPS
+    show_fps: bool,
 }
 
 fn model(app: &App) -> Model {
@@ -185,6 +189,14 @@ fn model(app: &App) -> Model {
         &config.speed,
     );
 
+    // Set up FPS manager
+    let mut fps = FpsManager::new_with(false, false);
+    let performer_rect = performer_window.rect();
+    fps.set_draw_position(pt2(
+        performer_rect.left() + 40.0,
+        performer_rect.top() - 10.0,
+    ));
+
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         text_layout,
@@ -213,9 +225,10 @@ fn model(app: &App) -> Model {
 
         rendering,
 
-        fps: Fps::default(),
+        fps,
 
-        debug: false,
+        show_fps: false,
+        show_debug: false,
     }
 }
 
@@ -224,14 +237,9 @@ fn main() {
 }
 
 fn update(app: &App, model: &mut Model, _update: Update) {
-    let now = Instant::now();
-    let duration = now - model.fps.last_update;
-    let dt = duration.as_secs_f32();
-    model.fps.last_update = now;
-
     // FPS update
-    if model.debug {
-        model.fps.update(app.time, dt);
+    if model.show_fps {
+        model.fps.update();
     }
 
     // Handle the background
@@ -265,12 +273,12 @@ fn performer_view(app: &App, model: &Model, frame: Frame) {
         .draw_to_frame(&model.performer_reshaper, &frame);
 
     // Handle FPS and origin display
-    if model.debug {
-        draw_debug(app, model);
-
-        // Then draw UI over it
-        let _ = model.draw.to_frame(app, &frame);
+    if model.show_fps {
+        model.fps.draw(&model.performer_draw);
     }
+
+    // Then draw UI over it
+    let _ = model.performer_draw.to_frame(app, &frame);
 }
 
 fn audience_view(app: &App, model: &Model, frame: Frame) {
@@ -281,6 +289,14 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
     model
         .rendering
         .draw_to_frame(&model.audience_reshaper, &frame);
+
+    // Handle FPS and origin display
+    if model.show_debug {
+        draw_debug(app, model);
+    }
+
+    // Then draw UI over it
+    let _ = model.audience_draw.to_frame(app, &frame);
 }
 
 // ****************************** View functions ***********************************
@@ -423,39 +439,9 @@ impl Default for Fps {
     }
 }
 
-impl Fps {
-    pub fn start(&mut self, time: f32) {
-        self.fps = 0.0;
-        self.frame_count = 0;
-        self.frame_time_accumulator = 0.0;
-        self.last_fps_display_update = time;
-    }
-
-    pub fn update(&mut self, time: f32, dt: f32) {
-        self.frame_count += 1;
-        self.frame_time_accumulator += dt;
-        let elapsed_since_last_fps_update = time - self.last_fps_display_update;
-        if elapsed_since_last_fps_update >= self.fps_update_interval {
-            if self.frame_count > 0 {
-                let avg_frame_time = self.frame_time_accumulator / self.frame_count as f32;
-                self.fps = if avg_frame_time > 0.0 {
-                    1.0 / avg_frame_time
-                } else {
-                    0.0
-                };
-            }
-
-            // Reset accumulators
-            self.frame_count = 0;
-            self.frame_time_accumulator = 0.0;
-            self.last_fps_display_update = time;
-        }
-    }
-}
-
 fn draw_debug(app: &App, model: &Model) {
-    let draw = &model.performer_draw;
-    let rect = app.window(model.performer_window_id).unwrap().rect();
+    let draw = &model.audience_draw;
+    let rect = app.window(model.audience_window_id).unwrap().rect();
 
     // Draw (+,+) axes
     draw.line()
@@ -474,15 +460,6 @@ fn draw_debug(app: &App, model: &Model) {
         .stroke(rgba(0.5, 1.0, 0.5, 0.5)) // Green outline
         .stroke_weight(2.0)
         .no_fill();
-
-    // Visualize FPS (Optional)
-    draw.text(&format!(
-        "FPS: {:.1}\nTranslation: {:?}",
-        model.fps.fps, model.translate.translation_type
-    ))
-    .x_y(rect.w() / 2.0 - 100.0, rect.h() / 2.0 - 30.0)
-    .color(RED)
-    .font_size(10);
 }
 
 // ************************ Main window input  *************************************
@@ -514,8 +491,11 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
             println!("Translation set to French");
         }
         Key::P => {
-            model.debug = !model.debug;
-            model.fps.start(app.time);
+            model.show_fps = !model.show_fps;
+            model.fps.toggle();
+        }
+        Key::D => {
+            model.show_debug = !model.show_debug;
         }
         Key::Escape => {
             //shutdown(model);
