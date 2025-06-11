@@ -408,13 +408,16 @@ impl TextGrid {
                     .values()
                     .all(|msg| msg.is_empty()))
         {
+            let mut drawn_entities = 0;
             for entity in self.content_chars.iter() {
                 if entity.is_visible {
                     self::draw_character(draw, entity, font, time);
+                    drawn_entities += 1;
                 }
             }
 
-            return true;
+            // If all the characters have been drawn, return true to trigger translation drawing
+            return drawn_entities >= self.content_chars.len();
 
         // Render live content; no translation
         } else {
