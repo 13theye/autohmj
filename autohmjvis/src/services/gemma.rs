@@ -316,11 +316,14 @@ impl GemmaInstance {
     // generate request content to be sent to this instance
     pub fn generate_contents(
         &self,
+        // This is used when messages were automatically sent to the AI upon pressing
+        // enter. Now, we only send the convo when performer presses the AI button.
         new_item: Option<&ConvoItem>,
+        //
         conversation: &Conversation,
         system_prompt: &str,
     ) -> Vec<RequestContent> {
-        // attach prompt to the message content
+        // attach prompt to the message contents
         let mut contents = vec![RequestContent {
             role: "user".to_string(),
             parts: vec![Part {
@@ -339,7 +342,7 @@ impl GemmaInstance {
 
             // Prepend human or ai if role is user so AI can differentiate User messages
             let text = if role == "user" {
-                format!("{}: {}", item.author, item.message)
+                format_message(&item.author, &item.message)
             } else {
                 item.message.to_owned()
             };
@@ -364,6 +367,15 @@ impl GemmaInstance {
         contents
     }
 }
+
+/********************* Helper functions for GemmaInstance ************************************* */
+
+// Format to include the author of the message
+fn format_message(author: &str, message: &str) -> String {
+    format!("{}: {}", author, message)
+}
+
+/********************* Helper structs ********************************************************* */
 
 // A wrapper for a prompt defining a Gemma personality
 #[derive(Debug)]

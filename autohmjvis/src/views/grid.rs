@@ -144,6 +144,8 @@ impl TextGrid {
         }
     }
 
+    // Called once per frame. Receive live input from human players, update state according to
+    // events, then update animations. Send sequencer/OSC if on time. Then draw the grid.
     pub fn update(
         &mut self,
         time: f32,
@@ -163,6 +165,7 @@ impl TextGrid {
         self.draw(draw, text_layout, font, alt_font, translation_type, time);
     }
 
+    // If this word is being sent to the sequencer, trigger the animation
     fn trigger_sequence_animation(&mut self, time: f32) {
         if !self.content_chars.is_empty() {
             let entity = &mut self.content_chars[self.sequencer.current_idx];
@@ -172,13 +175,15 @@ impl TextGrid {
         }
     }
 
+    // Called every update to update the animation state of the current word
     fn update_animation(&mut self, time: f32) {
         if let Some((key, _)) = self.latest {
             self.animation.update(time, key, &mut self.content_chars);
         }
     }
 
-    // Read the live input from the human user
+    // Read the live input from the human user. Compare the input string to the previous
+    // state of the input string, and set up animation states accordingly.
     fn read_live_input(&mut self) {
         if let Some(human_msg) = self.connections.read().unwrap().get(&self.id) {
             // Don't do anything if there's no input and there's a previous  message displayed.
@@ -317,7 +322,7 @@ impl TextGrid {
     // If the author is human, there are two possibilities:
     // 1. As above
     // 2. Message is currently "in progress" -- so need need to handle the input via
-    // ...the Connections HashMap in Main. (todo)
+    // ...the Connections HashMap in Main.
 
     fn process_events(&mut self, time: f32) {
         while let Ok(event) = self.convo_rx.try_recv() {
@@ -490,8 +495,7 @@ impl TextGrid {
                 continue;
             }
 
-            // Skip spaces and punctuation
-
+            // Skip disallowed punctuation
             if
             //ch.is_whitespace() ||
             ch.is_ascii_punctuation() && !ALLOWED_PUNCTUATION.contains(&ch) {
