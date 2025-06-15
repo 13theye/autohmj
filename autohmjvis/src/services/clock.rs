@@ -29,7 +29,6 @@ impl ClockService {
         let now = Instant::now();
 
         if now >= self.next_tick {
-            //println!("Time difference: {}", (now - self.next_tick).as_secs_f64());
             self.beat_count += 1;
             self.last_tick = now;
             self.next_tick = self.start_time + self.beat_duration.mul_f64(self.beat_count as f64);

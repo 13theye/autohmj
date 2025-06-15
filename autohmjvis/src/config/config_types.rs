@@ -49,6 +49,7 @@ pub struct PathConfig {
     pub output_directory: String,
     pub auth: String,
     pub gemma: String,
+    pub intro_image: String,
 }
 
 #[derive(Debug, Deserialize)]

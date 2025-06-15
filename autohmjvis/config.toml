@@ -41,6 +41,8 @@ output_directory = "frames"
 auth = "auth"
 # directory for gemma.toml: Gemma AI config:
 gemma = "gemma"
+# path to intro image:
+intro_image = "intro.png"
 
 [rendering_main]
 texture_width = 3840

@@ -16,6 +16,7 @@ use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig, GridConfig, OscSendConfig, SpeedConfig},
     events::EventBus,
     fps::FpsManager,
+    intro::IntroImage,
     models::{CommandMessage, HMJMessageWrapper},
     server::HMJServer,
     services::{ConversationService, GemmaPersona, GemmaService, TranslationService},
@@ -26,6 +27,7 @@ use autohmjvis::{
 
 struct Model {
     background: BackgroundManager,
+    intro_image: IntroImage,
     text_layout: Layout,
 
     // Services
@@ -199,8 +201,13 @@ fn model(app: &App) -> Model {
         performer_rect.top() - 10.0,
     ));
 
+    // Intro image
+    let mut intro_image = IntroImage::new(&config.paths.intro_image);
+    intro_image.load(app);
+
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
+        intro_image,
         text_layout,
 
         convo,
@@ -278,6 +285,17 @@ fn performer_view(app: &App, model: &Model, frame: Frame) {
         .rendering
         .draw_to_frame(&model.performer_reshaper, &frame);
 
+    // If audience is viewing intro image, show this message
+    if model.intro_image.is_visible() {
+        model
+            .performer_draw
+            .text("Intro Image Onscreen.\nSelect this window and press I to hide/show.")
+            .x_y(0.0, 0.0)
+            .wh(pt2(500.0, 500.0))
+            .font_size(50)
+            .color(RED);
+    }
+
     // Handle FPS and origin display
     if model.show_fps {
         model.fps.draw(&model.performer_draw);
@@ -300,6 +318,13 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
     model
         .rendering
         .draw_to_frame(&model.audience_reshaper, &frame);
+
+    // Draw intro image if visible
+    if model.intro_image.is_visible() {
+        let rect = app.window(model.audience_window_id).unwrap().rect();
+
+        model.intro_image.draw(&model.audience_draw, rect);
+    }
 
     // Handle FPS and origin display
     if model.show_debug {
@@ -661,6 +686,9 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
         }
         Key::D => {
             model.show_debug = !model.show_debug;
+        }
+        Key::I => {
+            model.intro_image.toggle_visible();
         }
         Key::Escape => {
             //shutdown(model);
