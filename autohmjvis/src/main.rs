@@ -9,12 +9,12 @@ use std::{
     collections::HashMap,
     fs,
     sync::{Arc, RwLock},
-    time::Instant,
 };
+use tokio::sync::broadcast;
 
 use autohmjvis::{
     config::{AuthConfig, Config, GemmaConfig, GridConfig, OscSendConfig, SpeedConfig},
-    events::EventBus,
+    events::{EventBus, GemmaEvent},
     fps::FpsManager,
     intro::IntroImage,
     models::{CommandMessage, HMJMessageWrapper},
@@ -34,6 +34,10 @@ struct Model {
     convo: ConversationService,
     translate: TranslationService,
     ai: GemmaService,
+
+    // Conversation channel (for moderator)
+    gemma_rx: broadcast::Receiver<GemmaEvent>,
+    humans_turn: bool, // true if the moderator decides human should speak next
 
     // Text Grids
     grids: Vec<TextGrid>,
@@ -81,6 +85,7 @@ fn model(app: &App) -> Model {
 
     // Initialize event bus
     let events = EventBus::default();
+    let gemma_rx = events.gemma.subscribe();
 
     // Initialize HMJServer
     let mut server = HMJServer::new(config.server.port, &events);
@@ -105,10 +110,6 @@ fn model(app: &App) -> Model {
         .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
 
     // --- Load Font for Nannou Draw (Latin) ---
-    // Assumes "assets/avernir4.ttf" exists relative to the executable
-    // or relative to the project root if running with `cargo run`
-
-    //let font_path = assets.join("avenir4.ttf");
     let font_path = assets.join("gulim.ttf");
 
     let font_bytes = fs::read(&font_path)
@@ -214,6 +215,9 @@ fn model(app: &App) -> Model {
         translate,
         ai,
 
+        gemma_rx,
+        humans_turn: true,
+
         grids,
 
         korean_font,
@@ -260,6 +264,9 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     model.ai.update();
     model.server.update();
 
+    // Handle Gemma Moderator events
+    handle_moderator_events(model);
+
     // Receive incoming datagrams and update connections
     receive_hmjmessage(model);
 
@@ -273,6 +280,7 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     render_and_post(app, model);
 }
 
+// The view functions get a copy of the resized main texture, then draw UI/HUD elements over it.
 fn performer_view(app: &App, model: &Model, frame: Frame) {
     // Clear the performer draw before starting
     model.performer_draw.reset();
@@ -302,7 +310,7 @@ fn performer_view(app: &App, model: &Model, frame: Frame) {
     }
 
     // Draw current cursor position
-    draw_human_cursor(app, model);
+    draw_hud(app, model);
 
     // Then draw UI over it
     let _ = model.performer_draw.to_frame(app, &frame);
@@ -432,7 +440,7 @@ fn receive_hmjmessage(model: &mut Model) {
                 // Create convo item
                 let entry = ConversationService::new_item(&author, &message);
 
-                // Send to next AI speaker (now requires specific command)
+                // Send to next AI speaker (disabled: now requires specific command)
                 //let _ = model.ai.send(&entry, model.convo.entries());
 
                 // Add message to conversation
@@ -440,6 +448,7 @@ fn receive_hmjmessage(model: &mut Model) {
 
                 // Clear the buffer
                 model.connections.write().unwrap().remove(&author);
+                model.humans_turn = false;
             } else {
                 // Message is in progress
                 model
@@ -500,10 +509,43 @@ fn receive_hmjmessage(model: &mut Model) {
                             .ai
                             .send(GemmaPersona::Gemma2, None, model.convo.entries());
                     }
+                    "Moderator" => {
+                        let _ = model
+                            .ai
+                            .send(GemmaPersona::Moderator, None, model.convo.entries());
+                    }
                     _ => {
                         println!("Unknown AI ID: {}", ai_id);
                     }
                 },
+                CommandMessage::ClearGrid(grid_id) => {
+                    let Some(grid) = model.grids.iter_mut().find(|grid| grid.id == grid_id) else {
+                        println!("No grid named {}", grid_id);
+                        return;
+                    };
+                    grid.clear();
+                }
+            }
+        }
+    }
+}
+
+fn handle_moderator_events(model: &mut Model) {
+    while let Ok(event) = model.gemma_rx.try_recv() {
+        if let GemmaEvent::ModeratorChooses(id) = event {
+            println!("Moderator chooses: {:?}", id);
+            if id == "Human" {
+                model.humans_turn = true;
+            } else {
+                let persona = match id.as_str() {
+                    "Left" => GemmaPersona::Gemma1,
+                    "Right" => GemmaPersona::Gemma2,
+                    _ => {
+                        println!("Unknown ID: {}", id);
+                        return;
+                    }
+                };
+                let _ = model.ai.send(persona, None, model.convo.entries());
             }
         }
     }
@@ -523,27 +565,6 @@ fn render_and_post(app: &App, model: &mut Model) {
 }
 
 // ************************ Performer HUD  *************************************
-struct Fps {
-    pub last_update: Instant,
-    pub fps: f32,
-    pub fps_update_interval: f32,
-    pub frame_count: usize,
-    pub last_fps_display_update: f32,
-    pub frame_time_accumulator: f32,
-}
-
-impl Default for Fps {
-    fn default() -> Self {
-        Self {
-            last_update: Instant::now(),
-            fps: 0.0,
-            fps_update_interval: 0.3,
-            frame_count: 0,
-            last_fps_display_update: 0.0,
-            frame_time_accumulator: 0.0,
-        }
-    }
-}
 
 fn draw_debug(app: &App, model: &Model) {
     let draw = &model.audience_draw;
@@ -568,7 +589,7 @@ fn draw_debug(app: &App, model: &Model) {
         .no_fill();
 }
 
-fn draw_human_cursor(app: &App, model: &Model) {
+fn draw_hud(app: &App, model: &Model) {
     let Some(grid) = model.grids.iter().find(|grid| grid.id == "Human") else {
         println!("No human grid found");
         return;
@@ -589,6 +610,20 @@ fn draw_human_cursor(app: &App, model: &Model) {
     let cell_width = grid.cell_width * scale_x;
     let cell_height = grid.cell_height * scale_y;
 
+    let grid_color = rgba(0.0, 0.3, 0.0, 1.0);
+
+    let next_speaker_indicator_color = if model.humans_turn {
+        rgba(0.0, 0.83, 0.0, 1.0)
+    } else {
+        rgba(0.72, 0.0, 0.0, 1.0)
+    };
+
+    // Draw next speaker indicator
+    draw.ellipse()
+        .x_y(0.0, message_y + 50.0)
+        .w_h(10.0, 10.0)
+        .color(next_speaker_indicator_color);
+
     for row in 0..=rows {
         draw.line()
             .points(
@@ -601,7 +636,7 @@ fn draw_human_cursor(app: &App, model: &Model) {
                     (message_y + cell_height / 2.0) - row as f32 * cell_height,
                 ),
             )
-            .color(rgba(0.0, 0.3, 0.0, 1.0))
+            .color(grid_color)
             .stroke_weight(1.0);
     }
 
@@ -617,7 +652,7 @@ fn draw_human_cursor(app: &App, model: &Model) {
                     (message_y + cell_height / 2.0) - rows as f32 * cell_height,
                 ),
             )
-            .color(rgba(0.0, 0.3, 0.0, 1.0))
+            .color(grid_color)
             .stroke_weight(1.0);
     }
 
@@ -676,10 +711,12 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
             model.translate.set_to_english();
             println!("Translation set to English");
         }
+        /*
         Key::Key7 => {
             model.translate.set_to_french();
             println!("Translation set to French");
         }
+         */
         Key::P => {
             model.show_fps = !model.show_fps;
             model.fps.toggle();

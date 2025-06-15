@@ -165,6 +165,11 @@ impl TextGrid {
         self.draw(draw, text_layout, font, alt_font, translation_type, time);
     }
 
+    pub fn clear(&mut self) {
+        self.content_chars = Vec::new();
+        self.latest = None;
+    }
+
     // If this word is being sent to the sequencer, trigger the animation
     fn trigger_sequence_animation(&mut self, time: f32) {
         if !self.content_chars.is_empty() {

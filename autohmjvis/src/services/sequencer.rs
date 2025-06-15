@@ -129,7 +129,7 @@ fn decompose_character(ch: char) -> Vec<char> {
         return vec![ch];
     }
 
-    println!("Original char: {}", ch);
+    //println!("Original char: {}", ch);
 
     // Unwrap the hangeul::Decomposed type
     if let Ok(result) = hangeul::decompose_char(&ch) {
@@ -147,7 +147,7 @@ fn decompose_character(ch: char) -> Vec<char> {
 // 12592 is the hangeul offset
 fn hangeul_to_i32(ch: char) -> i32 {
     let result = ch as u32; //- 12592;
-    println!("Character {}: {}", ch, result);
+                            //println!("Character {}: {}", ch, result);
 
     result as i32
 }

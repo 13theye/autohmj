@@ -21,11 +21,13 @@ use crate::{
 #[derive(Clone, Debug)]
 pub enum GemmaEvent {
     GemmaReceived(GemmaResponse),
+    ModeratorChooses(String),
     DefaultEvent,
 }
 
 pub struct GemmaService {
     pub instances: HashMap<GemmaPersona, GemmaInstance>, //<id, GemmaInstance>
+    pub moderator: GemmaModerator,
 
     // System prompt
     system_prompt: String,
@@ -52,11 +54,13 @@ impl GemmaService {
         let runtime =
             tokio::runtime::Runtime::new().expect("Failed to start Tokio runtime for GemmaManager");
         let (shutdown_tx, _) = broadcast::channel(1);
-        let instances = make_personas_from_config(config);
+        let (instances, moderator_instance) = make_instances_from_config(config);
+        let moderator = GemmaModerator::from_gemma_instance(moderator_instance);
         let event_tx = events.gemma.clone();
 
         Self {
             instances,
+            moderator,
             system_prompt,
             runtime: Some(runtime),
             client: Client::new(),
@@ -79,21 +83,29 @@ impl GemmaService {
         // Determine who should speak next
         //let gemma_instance = self.instances.get(&self.next_instance()).unwrap();
 
-        let Some(gemma_instance) = self.instances.get(&gemma_persona) else {
-            return Err(format!(
-                "No gemma instance found for persona: {:?}",
-                gemma_persona
-            ));
+        let gemma_instance: &GemmaInstance = if gemma_persona == GemmaPersona::Moderator {
+            &self.moderator.instance
+        } else {
+            let Some(gemma_instance) = self.instances.get(&gemma_persona) else {
+                return Err(format!(
+                    "No gemma instance found for persona: {:?}",
+                    gemma_persona
+                ));
+            };
+            gemma_instance
+        };
+
+        // Generate API request content
+        let contents = if gemma_persona == GemmaPersona::Moderator {
+            self.moderator.generate_contents(conversation)
+        } else {
+            gemma_instance.generate_contents(new_item, conversation, &self.system_prompt)
         };
 
         // Clone the client, api key, model name
         let client = self.client.clone();
         let api_key = self.api_key.clone();
         let model = gemma_instance.model.clone();
-
-        // Generate API request content
-        let contents =
-            gemma_instance.generate_contents(new_item, conversation, &self.system_prompt);
 
         if let Some(runtime) = &self.runtime {
             let tx = gemma_instance.tx.clone();
@@ -137,6 +149,30 @@ impl GemmaService {
 
     // Collect Gemma responses and broadcast
     pub fn receive_all(&mut self) {
+        // Receive from moderator
+        match self.moderator.instance.rx.try_recv() {
+            Ok(Some(message)) => {
+                if message.contains("Human") {
+                    let _ = self
+                        .event_tx
+                        .send(GemmaEvent::ModeratorChooses("Human".to_string()));
+                } else {
+                    self.instances
+                        .values()
+                        .filter(|instance| message.contains(&instance.id))
+                        .for_each(|instance| {
+                            let _ = self
+                                .event_tx
+                                .send(GemmaEvent::ModeratorChooses(instance.id.clone()));
+                        });
+                }
+            }
+            Ok(None) => {
+                println!("Received empty response from moderator");
+            }
+            Err(_) => {}
+        }
+
         for instance in self.instances.values_mut() {
             match instance.rx.try_recv() {
                 Ok(Some(message)) => {
@@ -206,7 +242,10 @@ impl Drop for GemmaService {
 }
 
 // an overly specific function to create and add two Gemmas from the config file
-pub fn make_personas_from_config(config: &GemmaConfig) -> HashMap<GemmaPersona, GemmaInstance> {
+// and a moderator
+pub fn make_instances_from_config(
+    config: &GemmaConfig,
+) -> (HashMap<GemmaPersona, GemmaInstance>, GemmaInstance) {
     let mut personas = HashMap::new();
 
     let gemma1 = GemmaInstance::new(
@@ -230,7 +269,16 @@ pub fn make_personas_from_config(config: &GemmaConfig) -> HashMap<GemmaPersona, 
     personas.insert(GemmaPersona::Gemma1, gemma1);
     personas.insert(GemmaPersona::Gemma2, gemma2);
 
-    personas
+    let moderator = GemmaInstance::new(
+        &config.moderator.id,
+        Personality {
+            prompt: config.moderator.prompt.to_owned(),
+        },
+        &config.moderator.model,
+    );
+    println!("Moderator ID: {:?}", moderator.id);
+
+    (personas, moderator)
 }
 
 // Sends a Rest API request to Google Gemini
@@ -359,7 +407,7 @@ impl GemmaInstance {
             contents.push(RequestContent {
                 role: "user".to_owned(),
                 parts: vec![Part {
-                    text: format!("{}: {}", new_item.author, new_item.message),
+                    text: format_message(&new_item.author, &new_item.message),
                 }],
             });
         }
@@ -390,14 +438,66 @@ pub struct GemmaResponse {
     pub message: String,
 }
 
-#[derive(Hash, PartialEq, Eq, Debug)]
+#[derive(Hash, PartialEq, Eq, Debug, Clone, Copy)]
 pub enum GemmaPersona {
     Gemma1,
     Gemma2,
+    Moderator,
+}
+
+/********************* AI Moderator ************************************* */
+//
+// The AI Moderator is a specialized GemmaInstance that receives the complete conversation history
+// and responds with a single word: The ID of the persona who should speak next.
+
+#[derive(Debug)]
+pub struct GemmaModerator {
+    pub instance: GemmaInstance,
+}
+
+impl GemmaModerator {
+    pub fn new(id: &str, personality: Personality, model: &str) -> Self {
+        let instance = GemmaInstance::new(id, personality, model);
+        Self { instance }
+    }
+
+    pub fn from_gemma_instance(instance: GemmaInstance) -> Self {
+        Self { instance }
+    }
+
+    fn build_prompt(&self) -> String {
+        self.instance.personality().to_owned()
+    }
+
+    fn generate_contents(&self, conversation: &Conversation) -> Vec<RequestContent> {
+        // 1. Build the special moderator prompt
+        let mut contents = vec![RequestContent {
+            role: "user".to_string(),
+            parts: vec![Part {
+                text: self.build_prompt(),
+            }],
+        }];
+
+        // 2. Include the conversation history
+        for item in conversation.values() {
+            // put all ConvoItems in the "user" role
+            let role = "user";
+
+            // Prepend the speaker's name
+            let text = format_message(&item.author, &item.message);
+
+            // Attach message body
+            contents.push(RequestContent {
+                role: role.to_owned(),
+                parts: vec![Part { text }],
+            });
+        }
+
+        contents
+    }
 }
 
 /********************* API types ************************************* */
-
 // The actual request contents to send to the Gemini API
 #[derive(Debug, Serialize)]
 struct GemmaRequest {
