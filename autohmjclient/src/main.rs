@@ -78,6 +78,13 @@ impl Model {
         let mut ai_left_clicked = false;
         let mut ai_right_clicked = false;
         let mut ai_both_clicked = false;
+        let mut ai_moderator_clicked = false;
+
+        // Clear Grid button clicked
+        let mut clear_left_clicked = false;
+        let mut clear_human_clicked = false;
+        let mut clear_right_clicked = false;
+        let mut clear_all_clicked = false;
 
         // Build the UI
         egui::TopBottomPanel::bottom("input_panel")
@@ -168,7 +175,8 @@ impl Model {
                                 });
                                 ui.vertical(|ui| {
                                     ui.set_min_width(70.0);
-                                    ui.add(egui::Button::new("Smart..?"));
+                                    ai_moderator_clicked =
+                                        ui.add(egui::Button::new("Moderator")).clicked();
                                 });
                             }); // ui horizontal for Send to AI
                         }); // ui vertical for label and buttons
@@ -218,6 +226,40 @@ impl Model {
                                         .changed();
                                 });
                             }); // ui horizontal for Send OSC
+                        }); // ui vertical for label and buttons
+                    }); // ui horizontal for label and buttons
+                    ui.add_space(7.0);
+
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(100.0);
+                            ui.label(
+                                egui::RichText::new("Clear Grid:")
+                                    .color(egui::Color32::from_rgb(150, 150, 150)),
+                            );
+                        });
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    clear_left_clicked =
+                                        ui.add(egui::Button::new("Left")).clicked();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    clear_human_clicked =
+                                        ui.add(egui::Button::new("Human")).clicked();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    clear_right_clicked =
+                                        ui.add(egui::Button::new("Right")).clicked();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    clear_all_clicked = ui.add(egui::Button::new("All")).clicked();
+                                });
+                            }); // ui horizontal for Clear
                         }); // ui vertical for label and buttons
                     }); // ui horizontal for label and buttons
                 }); // outermost ui vertical
@@ -285,6 +327,58 @@ impl Model {
                 cursor_position: None,
             };
             self.client.send(payload);
+        }
+
+        if ai_moderator_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::AISend("Moderator".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if clear_left_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::ClearGrid("Left".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if clear_human_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::ClearGrid("Human".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if clear_right_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::ClearGrid("Right".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if clear_all_clicked {
+            for name in ["Left", "Human", "Right"] {
+                let payload = HMJMessageWrapper {
+                    author: self.client_id.to_owned(),
+                    message: None,
+                    command: Some(CommandMessage::ClearGrid(name.to_string())),
+                    cursor_position: None,
+                };
+                self.client.send(payload);
+            }
         }
     }
 
