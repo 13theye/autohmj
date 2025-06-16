@@ -37,7 +37,7 @@ struct Model {
 
     // Conversation channel (for moderator)
     gemma_rx: broadcast::Receiver<GemmaEvent>,
-    humans_turn: bool, // true if the moderator decides human should speak next
+    humans_turn: HumansTurn, // true if the moderator decides human should speak next
 
     // Text Grids
     grids: Vec<TextGrid>,
@@ -216,7 +216,7 @@ fn model(app: &App) -> Model {
         ai,
 
         gemma_rx,
-        humans_turn: true,
+        humans_turn: HumansTurn::True,
 
         grids,
 
@@ -448,7 +448,7 @@ fn receive_hmjmessage(model: &mut Model) {
 
                 // Clear the buffer
                 model.connections.write().unwrap().remove(&author);
-                model.humans_turn = false;
+                model.humans_turn = HumansTurn::False;
             } else {
                 // Message is in progress
                 model
@@ -535,17 +535,20 @@ fn handle_moderator_events(model: &mut Model) {
         if let GemmaEvent::ModeratorChooses(id) = event {
             println!("Moderator chooses: {:?}", id);
             if id == "Human" {
-                model.humans_turn = true;
+                model.humans_turn = HumansTurn::True;
             } else {
-                let persona = match id.as_str() {
-                    "Left" => GemmaPersona::Gemma1,
-                    "Right" => GemmaPersona::Gemma2,
-                    _ => {
-                        println!("Unknown ID: {}", id);
-                        return;
-                    }
-                };
-                let _ = model.ai.send(persona, None, model.convo.entries());
+                let persona: GemmaPersona;
+                if id == "Left" {
+                    model.humans_turn = HumansTurn::False;
+                    persona = GemmaPersona::Gemma1;
+                    let _ = model.ai.send(persona, None, model.convo.entries());
+                } else if id == "Right" {
+                    model.humans_turn = HumansTurn::False;
+                    persona = GemmaPersona::Gemma2;
+                    let _ = model.ai.send(persona, None, model.convo.entries());
+                } else {
+                    model.humans_turn = HumansTurn::Error;
+                }
             }
         }
     }
@@ -612,16 +615,18 @@ fn draw_hud(app: &App, model: &Model) {
 
     let grid_color = rgba(0.0, 0.3, 0.0, 1.0);
 
-    let next_speaker_indicator_color = if model.humans_turn {
+    let next_speaker_indicator_color = if model.humans_turn == HumansTurn::True {
         rgba(0.0, 0.83, 0.0, 1.0)
-    } else {
+    } else if model.humans_turn == HumansTurn::False {
         rgba(0.72, 0.0, 0.0, 1.0)
+    } else {
+        rgba(0.8, 0.8, 0.0, 1.0)
     };
 
     // Draw next speaker indicator
     draw.ellipse()
-        .x_y(0.0, message_y + 50.0)
-        .w_h(10.0, 10.0)
+        .x_y(0.0, message_y + 80.0)
+        .w_h(20.0, 20.0)
         .color(next_speaker_indicator_color);
 
     for row in 0..=rows {
@@ -743,4 +748,11 @@ impl Drop for Model {
 
         println!("\nShutting down AutoHMJVis...");
     }
+}
+
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+enum HumansTurn {
+    True,
+    False,
+    Error,
 }

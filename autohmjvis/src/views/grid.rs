@@ -488,22 +488,27 @@ impl TextGrid {
     // Create character entities from a message string. Hides characters by default
     // so that animations can reveal them.
     fn character_entities_from(&self, message: &str) -> Vec<CharacterEntity> {
+        let len = message.chars().count();
         let mut entities = Vec::new();
         let mut row = 0;
         let mut col = 0;
 
-        for ch in message.chars() {
+        for (idx, ch) in message.chars().enumerate() {
+            // Stop processing chars for display if rows are filled
+            if row >= self.rows {
+                break;
+            }
+
+            // Stop processing if we are at the end of the message and the last character is a period
+            // This prevents the only character in a row from being a period
+            if ch == '.' && col == 0 && idx == len - 1 {
+                break;
+            }
+
             // Advance to next row on a \n
             if ch == '\n' {
                 row += 1;
                 col = 0;
-                continue;
-            }
-
-            // Skip disallowed punctuation
-            if
-            //ch.is_whitespace() ||
-            ch.is_ascii_punctuation() && !ALLOWED_PUNCTUATION.contains(&ch) {
                 continue;
             }
 
@@ -523,7 +528,6 @@ impl TextGrid {
 
             col += 1;
 
-            // Advance to next row if a column is filled
             if col >= self.cols {
                 row += 1;
                 col = 0;

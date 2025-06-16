@@ -129,6 +129,7 @@ impl GemmaService {
                             if let Some(source) = e.source() {
                                 eprintln!("Error source: {}", source);
                             }
+                            let _ = tx.send(None).await;
                         }
                     }
                 };
@@ -169,8 +170,11 @@ impl GemmaService {
             }
             Ok(None) => {
                 println!("Received empty response from moderator");
+                let _ = self
+                    .event_tx
+                    .send(GemmaEvent::ModeratorChooses("No Response".to_string()));
             }
-            Err(_) => {}
+            Err(_) => {} // ignore
         }
 
         for instance in self.instances.values_mut() {
