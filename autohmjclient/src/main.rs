@@ -86,6 +86,9 @@ impl Model {
         let mut clear_right_clicked = false;
         let mut clear_all_clicked = false;
 
+        // Clear Conversation History button clicked
+        let mut reset_conversation_history_clicked = false;
+
         // Build the UI
         egui::TopBottomPanel::bottom("input_panel")
             .frame(bottom_frame)
@@ -262,6 +265,26 @@ impl Model {
                             }); // ui horizontal for Clear
                         }); // ui vertical for label and buttons
                     }); // ui horizontal for label and buttons
+                    ui.add_space(14.0);
+
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(100.0);
+                            ui.label(
+                                egui::RichText::new("Reset\nConversation:")
+                                    .color(egui::Color32::from_rgb(150, 150, 150)),
+                            );
+                        });
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    reset_conversation_history_clicked =
+                                        ui.add(egui::Button::new("RESET ALL")).clicked();
+                                });
+                            }); // ui horizontal for Clear Conversation History
+                        }); // ui vertical for label and buttons
+                    });
                 }); // outermost ui vertical
             }); // ui topbottompanel
 
@@ -379,6 +402,16 @@ impl Model {
                 };
                 self.client.send(payload);
             }
+        }
+
+        if reset_conversation_history_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::ResetConversation),
+                cursor_position: None,
+            };
+            self.client.send(payload);
         }
     }
 
