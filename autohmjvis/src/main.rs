@@ -525,6 +525,12 @@ fn receive_hmjmessage(model: &mut Model) {
                     };
                     grid.clear();
                 }
+                CommandMessage::ResetConversation => {
+                    model.convo.reset();
+                    for grid in model.grids.iter_mut() {
+                        grid.clear();
+                    }
+                }
             }
         }
     }

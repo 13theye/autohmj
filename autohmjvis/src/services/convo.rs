@@ -124,4 +124,8 @@ impl ConversationService {
     pub fn new_item(author: &str, message: &str) -> ConvoItem {
         ConvoItem::new(author, message)
     }
+
+    pub fn reset(&mut self) {
+        self.conversation.reset();
+    }
 }

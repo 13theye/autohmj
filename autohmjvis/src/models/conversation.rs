@@ -58,6 +58,12 @@ impl ConversationManager {
         self.entries.remove(key);
     }
 
+    pub fn reset(&mut self) {
+        self.entries.clear();
+        self.latest_by_author.clear();
+        self.next_history_idx = 0;
+    }
+
     pub fn cleanup(&mut self) {
         while self.entries.len() > MAX_HISTORY {
             if let Some(smallest_key) = self.entries.keys().next().copied() {
