@@ -68,4 +68,6 @@ pub enum CommandMessage {
     OscLeftSetting(bool),
     OscRightSetting(bool),
     OscHumanSetting(bool),
+    ClearGrid(String),
+    ResetConversation,
 }
