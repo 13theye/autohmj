@@ -6,10 +6,10 @@ port = 50001
 # OSC receiver's IP address (String)
 target_addr = "127.0.0.1"
 # OSC receiver's port.
-target_port = 8000
+target_port = 45602
 
 [speed]
-bpm = 160
+bpm = 236
 
 [audience_window]
 # The size of the monitoring window.
@@ -23,7 +23,7 @@ width = 1440
 height = 810
 
 [grid]
-font_size_text = 50
+font_size_text = 60
 font_size_translation = 40
 rows = 8
 cols = 8
@@ -31,7 +31,7 @@ cols = 8
 top_margin = 200
 # margin between end of text grid and translation: (Int)
 bottom_margin = 100
-left_right_margin = 300
+left_right_margin = 350
 
 [paths]
 #paths are relative to executable directory
@@ -41,6 +41,8 @@ output_directory = "frames"
 auth = "auth"
 # directory for gemma.toml: Gemma AI config:
 gemma = "gemma"
+# path to intro image:
+intro_image = "intro.png"
 
 [rendering_main]
 texture_width = 3840

@@ -18,17 +18,17 @@ pub enum TranslationEvent {
 
 // Controller module for translations
 pub struct TranslationService {
-    translate: Arc<Translate>, // Translation API entry point
-    pub translation_type: TranslationType,
+    translate: Arc<Translate>,             // Translation API entry point
+    pub translation_type: TranslationType, // the destination language
 
     // Asynchronous translation
-    pub runtime: Option<tokio::runtime::Runtime>,
-    translation_tx: mpsc::Sender<(usize, Option<String>)>,
-    translation_rx: mpsc::Receiver<(usize, Option<String>)>,
+    pub runtime: Option<tokio::runtime::Runtime>, // the runtime for the translation
+    translation_tx: mpsc::Sender<(usize, Option<String>)>, // the channel for sending translations
+    translation_rx: mpsc::Receiver<(usize, Option<String>)>, // the channel for receiving translations
 
     // Events channel
-    event_tx: broadcast::Sender<TranslationEvent>,
-    history_rx: broadcast::Receiver<ConvoEvent>, // subscribe to HistoryEvents
+    event_tx: broadcast::Sender<TranslationEvent>, // the channel for sending translation events
+    history_rx: broadcast::Receiver<ConvoEvent>,   // subscribe to HistoryEvents
 
     // Shutdown signal
     shutdown_tx: broadcast::Sender<()>, // Sender for shutdown signal
@@ -69,6 +69,7 @@ impl TranslationService {
         self.receive_translations();
     }
 
+    // Translation services listens for a new ConvoItem and then attempts to translate the message.
     fn process_events(&mut self) {
         while let Ok(event) = self.history_rx.try_recv() {
             if let ConvoEvent::ItemAdded(key, item) = event {
@@ -84,6 +85,7 @@ impl TranslationService {
         }
     }
 
+    // Spawns a new async task to translate the message.
     fn request_translation(
         &mut self,
         key: usize,
@@ -121,7 +123,7 @@ impl TranslationService {
         }
     }
 
-    // Receive completed translations, update convo
+    // Receive completed translations, update convo by emitting a TranslationEvent::ItemTranslated event.
     fn receive_translations(&mut self) {
         while let Ok((key, translation)) = self.translation_rx.try_recv() {
             let _ = self
@@ -170,6 +172,7 @@ impl Drop for TranslationService {
     }
 }
 
+// The destination language for translation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TranslationType {
     ToEnglish,
@@ -177,6 +180,7 @@ pub enum TranslationType {
     ToKorean,
 }
 
+// The DeepLX translation API entry point.
 #[derive(Clone)]
 pub struct Translate {
     pub translator: DeepLX,
@@ -194,6 +198,7 @@ impl Default for Translate {
 }
 
 impl Translate {
+    // Get a translation from the DeepLX API.
     async fn get_translation(
         &self,
         input: &str,

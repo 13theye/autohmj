@@ -54,6 +54,17 @@ impl OscSender {
             .ok();
     }
 
+    pub fn send_punctuation(&self, id: &str, punctuation: i32) {
+        let addr = "/hunmin/punc".to_string();
+        let args = vec![
+            osc::Type::String(id.to_string()),
+            osc::Type::Int(punctuation),
+        ];
+        self.sender
+            .send((addr, args), (self.target_addr.as_str(), self.target_port))
+            .ok();
+    }
+
     pub fn send_num_letters(&self, id: &str, num_letters: i32) {
         let addr = "/hunmin/numLetters".to_string();
         let args = vec![

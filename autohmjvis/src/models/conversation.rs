@@ -1,11 +1,11 @@
 // src/models/conversation.rs
 //
-// The central conversation model
+// The conversation data model
 
 use std::collections::HashMap;
 
 // Re-export Conversation Types
-pub use autohmjcommon::{Conversation, ConvoItem, ConvoWrapper, HMJMessage};
+pub use autohmjcommon::{Conversation, ConvoItem, ConvoWrapper, HMJMessageWrapper};
 
 // Maximum number of entries in the conversation history
 const MAX_HISTORY: usize = 100;
@@ -39,13 +39,14 @@ impl ConversationManager {
         key
     }
 
+    // Add a translation to a ConvoItem
     pub fn add_translation(&mut self, key: usize, translation: Option<String>) {
         if let Some(item) = self.entries.get_mut(&key) {
             item.translation = translation;
         }
     }
 
-    // Get a reference to the most recent HistoryItem from a given author
+    // Get a reference to the most recent ConvoItem from a given author
     pub fn get_latest_by_author(&self, author: &str) -> Option<&ConvoItem> {
         if let Some(key) = self.latest_by_author.get(author) {
             self.entries.get(key)
@@ -54,10 +55,19 @@ impl ConversationManager {
         }
     }
 
+    // Remove a ConvoItem from the Conversation
     pub fn remove(&mut self, key: &usize) {
         self.entries.remove(key);
     }
 
+    // Clear all entries and reset the conversation
+    pub fn reset(&mut self) {
+        self.entries.clear();
+        self.latest_by_author.clear();
+        self.next_history_idx = 0;
+    }
+
+    // Remove oldest entries if the conversation history exceeds the maximum length
     pub fn cleanup(&mut self) {
         while self.entries.len() > MAX_HISTORY {
             if let Some(smallest_key) = self.entries.keys().next().copied() {

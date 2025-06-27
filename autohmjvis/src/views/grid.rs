@@ -25,7 +25,7 @@ const ALLOWED_PUNCTUATION: &[char] = &['?', '!', ':', ';', ',', '"', '\''];
 pub struct CharacterEntity {
     pub character: char,    // The complete character
     pub display_char: char, // The character currently being displayed (i.e. partial Hangeul)
-    position: Point2,
+    pub position: Point2,
     color: Rgba,
     font_size: u32,
     pub is_visible: bool,
@@ -39,10 +39,10 @@ pub struct CharacterEntity {
 
 // Handles character positioning
 pub struct TextGrid {
-    id: String,                                        // author
+    pub id: String,                                    // author
     is_human: bool,                                    // is this grid for a human?
     latest: Option<(usize, ConvoItem)>,                // the latest (key, message)
-    content_chars: Vec<CharacterEntity>,               // the latest message broken up into chars
+    pub content_chars: Vec<CharacterEntity>,           // the latest message broken up into chars
     connections: Arc<RwLock<HashMap<String, String>>>, // reference to model.connections
 
     // animation
@@ -57,13 +57,13 @@ pub struct TextGrid {
     clock: ClockService,
 
     // attributes
-    origin_x: f32,
-    message_y: f32,
+    pub origin_x: f32,  // left of the grid
+    pub message_y: f32, // top of the grid
     translation_y: f32,
-    cell_width: f32,
-    cell_height: f32,
-    rows: usize,
-    cols: usize,
+    pub cell_width: f32,
+    pub cell_height: f32,
+    pub rows: usize,
+    pub cols: usize,
     col_width: f32,
 
     // text style
@@ -144,6 +144,8 @@ impl TextGrid {
         }
     }
 
+    // Called once per frame. Receive live input from human players, update state according to
+    // events, then update animations. Send sequencer/OSC if on time. Then draw the grid.
     pub fn update(
         &mut self,
         time: f32,
@@ -163,6 +165,12 @@ impl TextGrid {
         self.draw(draw, text_layout, font, alt_font, translation_type, time);
     }
 
+    pub fn clear(&mut self) {
+        self.content_chars = Vec::new();
+        self.latest = None;
+    }
+
+    // If this word is being sent to the sequencer, trigger the animation
     fn trigger_sequence_animation(&mut self, time: f32) {
         if !self.content_chars.is_empty() {
             let entity = &mut self.content_chars[self.sequencer.current_idx];
@@ -172,13 +180,15 @@ impl TextGrid {
         }
     }
 
+    // Called every update to update the animation state of the current word
     fn update_animation(&mut self, time: f32) {
         if let Some((key, _)) = self.latest {
             self.animation.update(time, key, &mut self.content_chars);
         }
     }
 
-    // Read the live input from the human user
+    // Read the live input from the human user. Compare the input string to the previous
+    // state of the input string, and set up animation states accordingly.
     fn read_live_input(&mut self) {
         if let Some(human_msg) = self.connections.read().unwrap().get(&self.id) {
             // Don't do anything if there's no input and there's a previous  message displayed.
@@ -190,7 +200,7 @@ impl TextGrid {
                 self.latest = None;
             }
 
-            let human_msg = human_msg.trim();
+            //let human_msg = human_msg.trim(); // We're keeping whitespaces now
             let new_chars = self.character_entities_from(human_msg);
 
             // Don't replace if unchanged
@@ -317,7 +327,7 @@ impl TextGrid {
     // If the author is human, there are two possibilities:
     // 1. As above
     // 2. Message is currently "in progress" -- so need need to handle the input via
-    // ...the Connections HashMap in Main. (todo)
+    // ...the Connections HashMap in Main.
 
     fn process_events(&mut self, time: f32) {
         while let Ok(event) = self.convo_rx.try_recv() {
@@ -468,7 +478,7 @@ impl TextGrid {
     }
 
     // Calculate the position of a character for a given grid coordinate
-    fn place_char_at(&self, row: usize, col: usize) -> Point2 {
+    pub fn place_char_at(&self, row: usize, col: usize) -> Point2 {
         pt2(
             self.origin_x + (col as f32 * self.cell_width),
             self.message_y - (row as f32 * self.cell_height),
@@ -478,23 +488,27 @@ impl TextGrid {
     // Create character entities from a message string. Hides characters by default
     // so that animations can reveal them.
     fn character_entities_from(&self, message: &str) -> Vec<CharacterEntity> {
+        let len = message.chars().count();
         let mut entities = Vec::new();
         let mut row = 0;
         let mut col = 0;
 
-        for ch in message.chars() {
+        for (idx, ch) in message.chars().enumerate() {
+            // Stop processing chars for display if rows are filled
+            if row >= self.rows {
+                break;
+            }
+
+            // Stop processing if we are at the end of the message and the last character is a period
+            // This prevents the only character in a row from being a period
+            if ch == '.' && col == 0 && idx == len - 1 {
+                break;
+            }
+
             // Advance to next row on a \n
             if ch == '\n' {
                 row += 1;
                 col = 0;
-                continue;
-            }
-
-            // Skip spaces and punctuation
-
-            if
-            //ch.is_whitespace() ||
-            ch.is_ascii_punctuation() && !ALLOWED_PUNCTUATION.contains(&ch) {
                 continue;
             }
 
@@ -514,7 +528,6 @@ impl TextGrid {
 
             col += 1;
 
-            // Advance to next row if a column is filled
             if col >= self.cols {
                 row += 1;
                 col = 0;

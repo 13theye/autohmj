@@ -6,7 +6,7 @@
 
 use crate::{
     events::{ConvoEvent, EventBus},
-    models::HMJMessage,
+    models::HMJMessageWrapper,
 };
 use futures_util::{SinkExt, StreamExt};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
@@ -19,19 +19,21 @@ use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 // Event Interface
 #[derive(Clone, Debug)]
 pub enum ServerEvent {
-    RequestConversation,            // need to broadcast Conversation
-    RequestConversationFor(String), // need to send Conversation to Client ID
+    NeedConversation,            // need to broadcast Conversation
+    NeedConversationFor(String), // need to send Conversation to Client ID
 }
 
 pub struct HMJServer {
     // Server configuration
     port: u16,
 
-    // Async task channel
-    message_tx: mpsc::Sender<HMJMessage>,
-    message_rx: mpsc::Receiver<HMJMessage>,
+    // Async task channel - messages
+    // Used to directly send amd receive messages to a specific client
+    message_tx: mpsc::Sender<HMJMessageWrapper>,
+    message_rx: mpsc::Receiver<HMJMessageWrapper>,
 
     // Client broadcast channel
+    // Used to broadcast convo messages to all clients
     broadcast_tx: broadcast::Sender<String>,
 
     // Clients with direct channel
@@ -49,6 +51,7 @@ pub struct HMJServer {
     pub runtime: Option<tokio::runtime::Runtime>,
 
     // Shutdown channel
+    // Used to signal tasks to terminate
     shutdown_tx: broadcast::Sender<()>,
 }
 
@@ -79,19 +82,27 @@ impl HMJServer {
         }
     }
 
+    // The server's main loop is simple:
+    // 1. Process events and trigger appropriate actions
+    // 2. Gather new client registrations
     pub fn update(&mut self) {
         self.process_events();
         self.gather_registrations();
     }
 
+    // The server listens for events from the EventBus and triggers appropriate actions.
     fn process_events(&mut self) {
         while let Ok(event) = self.history_rx.try_recv() {
             match event {
                 // Broadcast Conversation to all Clients
+                // This command originates from ConversationService as a response to a request from this server
+                // for the serialized conversation history.
                 ConvoEvent::BroadcastConvoCommand(convo) => {
                     self.broadcast(convo);
                 }
                 // Send Conversation to a specific client
+                // This command originates from ConversationService as a response to a request from this server
+                // for the serialized conversation history, but only for a specific client.
                 ConvoEvent::SendConvoCommand(client_id, convo) => {
                     self.send_to_client(&client_id, convo);
                 }
@@ -102,8 +113,9 @@ impl HMJServer {
 
     /// Start the WebSocket server
     pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // If server runtime is already running, return Ok.
         if self.runtime.is_some() {
-            return Ok(()); // Already started
+            return Ok(());
         }
 
         // Create runtime
@@ -169,7 +181,7 @@ impl HMJServer {
     }
 
     /// Try to receive a message from clients (non-blocking)
-    pub fn try_recv(&mut self) -> Option<HMJMessage> {
+    pub fn try_recv_message(&mut self) -> Option<HMJMessageWrapper> {
         self.message_rx.try_recv().ok()
     }
 
@@ -204,7 +216,7 @@ impl HMJServer {
         while let Ok(client_id) = self.reg_rx.try_recv() {
             let _ = self
                 .event_tx
-                .send(ServerEvent::RequestConversationFor(client_id));
+                .send(ServerEvent::NeedConversationFor(client_id));
         }
     }
 
@@ -235,7 +247,7 @@ async fn handle_connection(
     stream: TcpStream,
     addr: SocketAddr,
     clients: Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>,
-    message_tx: mpsc::Sender<HMJMessage>,
+    message_tx: mpsc::Sender<HMJMessageWrapper>,
     broadcast_tx: broadcast::Sender<String>,
     shutdown_rx: broadcast::Receiver<()>,
     reg_tx: mpsc::Sender<String>,
@@ -343,7 +355,7 @@ async fn handle_connection(
                                     };
 
                                     if !id.is_empty() {
-                                        match serde_json::from_str::<HMJMessage>(&text) {
+                                        match serde_json::from_str::<HMJMessageWrapper>(&text) {
                                             Ok(hmj_message) => {
                                                 if let Err(e) = message_tx.send(hmj_message).await {
                                                     eprintln!("Failed to send message to channel: {}", e);

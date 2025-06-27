@@ -3,6 +3,7 @@ pub mod config;
 pub mod effects;
 pub mod events;
 pub mod fps;
+pub mod intro;
 pub mod models;
 pub mod osc;
 pub mod server;
