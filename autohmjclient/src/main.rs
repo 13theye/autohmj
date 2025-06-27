@@ -2,20 +2,26 @@
 //
 // auto-hunminjeongak client
 //
-// handling user input
+// Handles user input from the human performers.
+// The module relies on the egui framework for the UI and for handling Korean input.
+// The version of egui needed has an unresolvable dependency conflict with
+// the version of egui used in Nannou, which is the main reason why the client is maintained as
+// a separate crate.
 
 use autohmjclient::config::Config;
 use eframe::{egui, CreationContext};
 use egui::{FontData, FontDefinitions, FontFamily, FontId, TextStyle};
 use std::collections::BTreeMap;
 
-use autohmjclient::client::HMJClient;
-use autohmjcommon::{Conversation, ConvoWrapper, HMJMessage};
+use autohmjclient::{client::HMJClient, control::Settings};
+use autohmjcommon::{CommandMessage, Conversation, ConvoWrapper, HMJMessageWrapper};
 
 // The application state for the input-only window
 struct Model {
     // input from the user
     input_text: String,
+    // cursor position
+    cursor_position: Option<usize>,
     // History of submitted lines
     conversation: Conversation,
     // Flag to request focus next frame
@@ -26,6 +32,9 @@ struct Model {
     // WebSocket Client
     client: HMJClient,
     client_id: String,
+
+    // Settings for the vis
+    settings: Settings,
 }
 
 impl Model {
@@ -38,16 +47,22 @@ impl Model {
 
         Self {
             input_text: String::new(),
+            cursor_position: None,
             conversation: BTreeMap::new(),
             input_focus_next_frame: true,
             input_id: egui::Id::new("input_field"),
 
             client,
             client_id: client_id.to_owned(),
+
+            settings: Settings::default(),
         }
     }
 
     /**************************** Window components **************************************** */
+    // The UI frame for the input field and buttons
+    // The UI buttons are used to control the performance. They are implemented in a very basic way that could be
+    // improved in the future for clarity.
     fn build_input_frame(&mut self, ctx: &egui::Context) {
         // Define UI style
         let bottom_frame = egui::Frame {
@@ -60,6 +75,26 @@ impl Model {
             fill: egui::Color32::BLACK,
             ..Default::default()
         };
+
+        // UI Settings
+        let mut osc_left_changed = false;
+        let mut osc_right_changed = false;
+        let mut osc_human_changed = false;
+
+        // AI Button clicked
+        let mut ai_left_clicked = false;
+        let mut ai_right_clicked = false;
+        let mut ai_both_clicked = false;
+        let mut ai_moderator_clicked = false;
+
+        // Clear Grid button clicked
+        let mut clear_left_clicked = false;
+        let mut clear_human_clicked = false;
+        let mut clear_right_clicked = false;
+        let mut clear_all_clicked = false;
+
+        // Clear Conversation History button clicked
+        let mut reset_conversation_history_clicked = false;
 
         // Build the UI
         egui::TopBottomPanel::bottom("input_panel")
@@ -75,14 +110,22 @@ impl Model {
                                 .size(20.0)
                                 .color(egui::Color32::WHITE),
                         );
-                        let response = ui.add(
-                            egui::TextEdit::singleline(&mut self.input_text)
-                                .id_source(self.input_id)
-                                .font(egui::FontId::new(20.0, FontFamily::Monospace))
-                                .desired_width(f32::INFINITY)
-                                .frame(false)
-                                .text_color(egui::Color32::WHITE),
-                        );
+                        let text_edit_output = egui::TextEdit::singleline(&mut self.input_text)
+                            .id_source(self.input_id)
+                            .font(egui::FontId::new(20.0, FontFamily::Monospace))
+                            .desired_width(f32::INFINITY)
+                            .frame(false)
+                            .text_color(egui::Color32::WHITE)
+                            .show(ui);
+
+                        let response = text_edit_output.response;
+
+                        // Extract cursor position
+                        if let Some(cursor_range) = text_edit_output.cursor_range {
+                            // Get the cursor position (use the primary cursor position)
+                            let cursor_pos = cursor_range.primary.ccursor.index;
+                            self.cursor_position = Some(cursor_pos);
+                        }
 
                         // handle focus
                         if self.input_focus_next_frame {
@@ -100,25 +143,296 @@ impl Model {
                             && ctx.input(|i| i.key_pressed(egui::Key::Enter))
                         {
                             // send commit to server
-                            let commit = HMJMessage(
-                                self.client_id.to_owned(),
-                                self.input_text.trim().to_owned() + "\n",
-                            );
+                            let commit = HMJMessageWrapper {
+                                author: self.client_id.to_owned(),
+                                message: Some(self.input_text.to_owned() + "\n"),
+                                command: None,
+                                cursor_position: self.cursor_position,
+                            };
                             self.client.send(commit);
                             // clear the input field
                             self.input_text.clear();
                             // keep the focus so they can type again immediately
                             response.request_focus();
                         } /*else {
-                              // Stream current text (without newline = not committed)
-                              let payload = format!("{}:{}", self.client_id, self.input_text);
-                              self.client.send(payload);
-                          }*/
+                          // Keeping here for reference.
+                                // Stream current text (without newline = not committed)
+                                // This was used back when pressing Enter immediately triggered a send to Gemma.
+                                // Now, we stream the input text in the Update loop.
+                                let payload = format!("{}:{}", self.client_id, self.input_text);
+                                self.client.send(payload);
+                            }*/
+                    }); // ui horizontal
+                    ui.add_space(20.0);
+                    //
+                    // Buttons to send to an AI
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(100.0);
+                            ui.label(
+                                egui::RichText::new("Send to AI:")
+                                    .color(egui::Color32::from_rgb(150, 150, 150)),
+                            );
+                        });
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    ai_left_clicked = ui.add(egui::Button::new("Left")).clicked();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    ai_right_clicked = ui.add(egui::Button::new("Right")).clicked();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    ai_both_clicked = ui.add(egui::Button::new("Both")).clicked();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    ai_moderator_clicked =
+                                        ui.add(egui::Button::new("Moderator")).clicked();
+                                });
+                            }); // ui horizontal for Send to AI
+                        }); // ui vertical for label and buttons
+                    }); // ui horizontal for label and buttons
+                    ui.add_space(7.0);
+                    //
+                    // Checkboxes to control OSC sending
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(100.0);
+                            ui.label(
+                                egui::RichText::new("OSC Sending:")
+                                    .color(egui::Color32::from_rgb(150, 150, 150)),
+                            );
+                        });
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    osc_left_changed = ui
+                                        .add(egui::Checkbox::new(
+                                            &mut self.settings.send_osc_left,
+                                            egui::RichText::new("Left")
+                                                .strong()
+                                                .color(egui::Color32::from_rgb(150, 150, 150)),
+                                        ))
+                                        .changed();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    osc_human_changed = ui
+                                        .add(egui::Checkbox::new(
+                                            &mut self.settings.send_osc_human,
+                                            egui::RichText::new("Human")
+                                                .strong()
+                                                .color(egui::Color32::from_rgb(150, 150, 150)),
+                                        ))
+                                        .changed();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    osc_right_changed = ui
+                                        .add(egui::Checkbox::new(
+                                            &mut self.settings.send_osc_right,
+                                            egui::RichText::new("Right")
+                                                .strong()
+                                                .color(egui::Color32::from_rgb(150, 150, 150)),
+                                        ))
+                                        .changed();
+                                });
+                            }); // ui horizontal for Send OSC
+                        }); // ui vertical for label and buttons
+                    }); // ui horizontal for label and buttons
+                    ui.add_space(7.0);
+                    //
+                    // Buttons to clear the grid
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(100.0);
+                            ui.label(
+                                egui::RichText::new("Clear Grid:")
+                                    .color(egui::Color32::from_rgb(150, 150, 150)),
+                            );
+                        });
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    clear_left_clicked =
+                                        ui.add(egui::Button::new("Left")).clicked();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    clear_human_clicked =
+                                        ui.add(egui::Button::new("Human")).clicked();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    clear_right_clicked =
+                                        ui.add(egui::Button::new("Right")).clicked();
+                                });
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    clear_all_clicked = ui.add(egui::Button::new("All")).clicked();
+                                });
+                            }); // ui horizontal for Clear
+                        }); // ui vertical for label and buttons
+                    }); // ui horizontal for label and buttons
+                    ui.add_space(14.0);
+                    //
+                    // Button to reset the conversation history
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_min_width(100.0);
+                            ui.label(
+                                egui::RichText::new("Reset\nConversation:")
+                                    .color(egui::Color32::from_rgb(150, 150, 150)),
+                            );
+                        });
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(70.0);
+                                    reset_conversation_history_clicked =
+                                        ui.add(egui::Button::new("RESET ALL")).clicked();
+                                });
+                            }); // ui horizontal for Clear Conversation History
+                        }); // ui vertical for label and buttons
                     });
-                });
-            });
+                }); // outermost ui vertical
+            }); // ui topbottompanel
+
+        // If any of the OSC settings changed, send a message to the server
+        if osc_left_changed {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::OscLeftSetting(self.settings.send_osc_left)),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if osc_right_changed {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::OscRightSetting(
+                    self.settings.send_osc_right,
+                )),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+        if osc_human_changed {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::OscHumanSetting(
+                    self.settings.send_osc_human,
+                )),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if ai_left_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::AISend("Left".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if ai_right_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::AISend("Right".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if ai_both_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::AISend("Both".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if ai_moderator_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::AISend("Moderator".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if clear_left_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::ClearGrid("Left".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if clear_human_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::ClearGrid("Human".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if clear_right_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::ClearGrid("Right".to_string())),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
+
+        if clear_all_clicked {
+            for name in ["Left", "Human", "Right"] {
+                let payload = HMJMessageWrapper {
+                    author: self.client_id.to_owned(),
+                    message: None,
+                    command: Some(CommandMessage::ClearGrid(name.to_string())),
+                    cursor_position: None,
+                };
+                self.client.send(payload);
+            }
+        }
+
+        if reset_conversation_history_clicked {
+            let payload = HMJMessageWrapper {
+                author: self.client_id.to_owned(),
+                message: None,
+                command: Some(CommandMessage::ResetConversation),
+                cursor_position: None,
+            };
+            self.client.send(payload);
+        }
     }
 
+    // The UI frame for the conversation history
+    // Makes a scrollable area that displays the conversation history.
     fn build_conversation_frame(&mut self, ctx: &egui::Context) {
         // Define UI Style
         let convo_frame = egui::Frame {
@@ -177,7 +491,7 @@ impl Model {
                                 ui.vertical(|ui| {
                                     // Original message
                                     ui.label(
-                                        egui::RichText::new(entry.message.trim_end())
+                                        egui::RichText::new(entry.message.to_owned())
                                             .monospace()
                                             .size(20.0)
                                             .color(egui::Color32::WHITE),
@@ -227,7 +541,12 @@ impl eframe::App for Model {
         self.build_conversation_frame(ctx);
 
         // After the UI is built, stream the current text live:
-        let payload = HMJMessage(self.client_id.to_owned(), self.input_text.to_owned());
+        let payload = HMJMessageWrapper {
+            author: self.client_id.to_owned(),
+            message: Some(self.input_text.to_owned()),
+            command: None,
+            cursor_position: self.cursor_position,
+        };
         self.client.send(payload);
     }
 }
@@ -257,6 +576,7 @@ fn main() {
 
 /**************************** Text display style functions ***************************** */
 
+// Loads the Gulim font from the assets folder.
 fn make_gulim_fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let font_data = FontData::from_static(include_bytes!("../assets/gulim.ttf"));
@@ -282,5 +602,6 @@ fn set_styles(cc: &CreationContext) {
         TextStyle::Monospace,
         FontId::new(20.0, FontFamily::Monospace),
     );
+    style.visuals.override_text_color = Some(egui::Color32::from_rgb(150, 150, 150));
     cc.egui_ctx.set_style(style);
 }

@@ -10,7 +10,7 @@ address = "127.0.0.1"
 # The size of the input window.
 # Currently scaling to 1/2 of texture resolution
 width = 600
-height = 400
+height = 600
 
 [osc]
 # OSC listening port. UDP only.

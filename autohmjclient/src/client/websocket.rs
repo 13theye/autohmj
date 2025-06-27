@@ -2,7 +2,7 @@
 //
 // Client module for HMJServer WebSocket communication
 
-use autohmjcommon::HMJMessage;
+use autohmjcommon::HMJMessageWrapper;
 use futures_util::{SinkExt, StreamExt};
 use std::time::Duration;
 use tokio::{
@@ -17,7 +17,7 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 // Commands that the WS client understands
 enum Command {
     // Send a message through the WebSocket
-    SendMessage(HMJMessage),
+    SendMessage(HMJMessageWrapper),
     // Request to reconnect with server
     Reconnect,
     // Request to shut down the client
@@ -35,7 +35,7 @@ pub struct HMJClient {
 
     client_id: String,
     pub is_connected: bool,
-    task_handle: Option<JoinHandle<()>>,
+    task_handle: Option<JoinHandle<()>>, // Handle to the background task, used for graceful shutdown
 }
 
 impl HMJClient {
@@ -68,7 +68,7 @@ impl HMJClient {
     }
 
     // Send a message to the server via WS
-    pub fn send(&self, message: HMJMessage) {
+    pub fn send(&self, message: HMJMessageWrapper) {
         // Use blocking_send here because egui-based main app is synchronous
         let _ = self.command_tx.blocking_send(Command::SendMessage(message));
     }
