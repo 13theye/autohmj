@@ -35,7 +35,7 @@ pub struct HMJClient {
 
     client_id: String,
     pub is_connected: bool,
-    task_handle: Option<JoinHandle<()>>,
+    task_handle: Option<JoinHandle<()>>, // Handle to the background task, used for graceful shutdown
 }
 
 impl HMJClient {

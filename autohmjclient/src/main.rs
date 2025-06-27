@@ -2,7 +2,11 @@
 //
 // auto-hunminjeongak client
 //
-// handling user input
+// Handles user input from the human performers.
+// The module relies on the egui framework for the UI and for handling Korean input.
+// The version of egui needed has an unresolvable dependency conflict with
+// the version of egui used in Nannou, which is the main reason why the client is maintained as
+// a separate crate.
 
 use autohmjclient::config::Config;
 use eframe::{egui, CreationContext};
@@ -56,6 +60,9 @@ impl Model {
     }
 
     /**************************** Window components **************************************** */
+    // The UI frame for the input field and buttons
+    // The UI buttons are used to control the performance. They are implemented in a very basic way that could be
+    // improved in the future for clarity.
     fn build_input_frame(&mut self, ctx: &egui::Context) {
         // Define UI style
         let bottom_frame = egui::Frame {
@@ -148,12 +155,17 @@ impl Model {
                             // keep the focus so they can type again immediately
                             response.request_focus();
                         } /*else {
-                              // Stream current text (without newline = not committed)
-                              let payload = format!("{}:{}", self.client_id, self.input_text);
-                              self.client.send(payload);
-                          }*/
+                          // Keeping here for reference.
+                                // Stream current text (without newline = not committed)
+                                // This was used back when pressing Enter immediately triggered a send to Gemma.
+                                // Now, we stream the input text in the Update loop.
+                                let payload = format!("{}:{}", self.client_id, self.input_text);
+                                self.client.send(payload);
+                            }*/
                     }); // ui horizontal
                     ui.add_space(20.0);
+                    //
+                    // Buttons to send to an AI
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.set_min_width(100.0);
@@ -185,6 +197,8 @@ impl Model {
                         }); // ui vertical for label and buttons
                     }); // ui horizontal for label and buttons
                     ui.add_space(7.0);
+                    //
+                    // Checkboxes to control OSC sending
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.set_min_width(100.0);
@@ -232,7 +246,8 @@ impl Model {
                         }); // ui vertical for label and buttons
                     }); // ui horizontal for label and buttons
                     ui.add_space(7.0);
-
+                    //
+                    // Buttons to clear the grid
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.set_min_width(100.0);
@@ -266,7 +281,8 @@ impl Model {
                         }); // ui vertical for label and buttons
                     }); // ui horizontal for label and buttons
                     ui.add_space(14.0);
-
+                    //
+                    // Button to reset the conversation history
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.set_min_width(100.0);
@@ -415,6 +431,8 @@ impl Model {
         }
     }
 
+    // The UI frame for the conversation history
+    // Makes a scrollable area that displays the conversation history.
     fn build_conversation_frame(&mut self, ctx: &egui::Context) {
         // Define UI Style
         let convo_frame = egui::Frame {
@@ -558,6 +576,7 @@ fn main() {
 
 /**************************** Text display style functions ***************************** */
 
+// Loads the Gulim font from the assets folder.
 fn make_gulim_fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     let font_data = FontData::from_static(include_bytes!("../assets/gulim.ttf"));
