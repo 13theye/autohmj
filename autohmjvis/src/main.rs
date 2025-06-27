@@ -26,38 +26,38 @@ use autohmjvis::{
 //const HUMAN_ID: &str = "Human";
 
 struct Model {
-    background: BackgroundManager,
-    intro_image: IntroImage,
-    text_layout: Layout,
+    background: BackgroundManager, // handles background color and potential for transitions
+    intro_image: IntroImage,       // the intro image
+    text_layout: Layout,           // style and layout of text
 
     // Services
-    convo: ConversationService,
-    translate: TranslationService,
-    ai: GemmaService,
+    convo: ConversationService,    // handles the conversation
+    translate: TranslationService, // handles translation
+    ai: GemmaService,              // handles the AI
 
     // Conversation channel (for moderator)
-    gemma_rx: broadcast::Receiver<GemmaEvent>,
+    gemma_rx: broadcast::Receiver<GemmaEvent>, // the channel for Gemma events
     humans_turn: HumansTurn, // true if the moderator decides human should speak next
 
     // Text Grids
-    grids: Vec<TextGrid>,
+    grids: Vec<TextGrid>, // the onscreen text grids
 
     // WebSockets for client
-    server: HMJServer,
+    server: HMJServer,                                 // the WebSockets server
     connections: Arc<RwLock<HashMap<String, String>>>, // a shared reference to live input and cursor position
     cursor_positions: HashMap<String, usize>,          // the cursor position in the grid
 
     // Fonts
-    korean_font: Font,
-    latin_font: Font,
+    korean_font: Font, // the font for Korean text
+    latin_font: Font,  // the font for Latin text
 
     // Nannou API and rendering pipeline
-    rendering: Nnpipe,
+    rendering: Nnpipe, // the rendering pipeline
 
     // Draws
-    draw: nannou::Draw,
-    audience_draw: nannou::Draw,
-    performer_draw: nannou::Draw,
+    draw: nannou::Draw,           // the main draw
+    audience_draw: nannou::Draw,  // the draw for the audience window
+    performer_draw: nannou::Draw, // the draw for the performer window
 
     // Window's texture reshaper
     audience_window_id: WindowId,
@@ -66,7 +66,7 @@ struct Model {
     performer_reshaper: TextureReshaper,
 
     // FPS
-    fps: FpsManager,
+    fps: FpsManager, // handles FPS calculations and display
 
     // When true, displays more verbose messages in terminal
     show_debug: bool,
@@ -77,17 +77,23 @@ struct Model {
 
 fn model(app: &App) -> Model {
     // Load configs
+    // general config from the CONFIG.TOML file
     let config = Config::load().expect("\nAuto훈민정음: FAILED TO LOAD CONFIG.TOML\n");
+    // Gemma API key from the /auth/key.toml file
     let auth_config =
         AuthConfig::load(&config.paths.auth).expect("\nAuto훈민정음: FAILED TO LOAD KEY.TOML\n");
+
+    // Gemma config from the /gemma/gemma.toml file
     let gemma_config = GemmaConfig::load(&config.paths.gemma)
         .expect("\nAuto훈민정음: FAILED TO LOAD GEMMA.TOML\n");
 
     // Initialize event bus
     let events = EventBus::default();
+
+    // Subscribe to Gemma events
     let gemma_rx = events.gemma.subscribe();
 
-    // Initialize HMJServer
+    // Initialize & start HMJServer
     let mut server = HMJServer::new(config.server.port, &events);
     server.start().expect("Failed to start HMJServer");
 
@@ -99,7 +105,7 @@ fn model(app: &App) -> Model {
     let translate = TranslationService::new(&events);
     let ai = GemmaService::new(&gemma_config, &auth_config.google.api_key, &events);
 
-    // --- Load Font for Nannou Draw (Hangul) ---
+    // --- Load Font for Nannou Draw (Hangeul) ---
     // Assumes "assets/gulim.ttf" exists relative to the executable
     // or relative to the project root if running with `cargo run`
     let assets = app.assets_path().expect("Could not find assets directory");
@@ -111,7 +117,6 @@ fn model(app: &App) -> Model {
 
     // --- Load Font for Nannou Draw (Latin) ---
     let font_path = assets.join("gulim.ttf");
-
     let font_bytes = fs::read(&font_path)
         .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
     let latin_font = Font::from_bytes(font_bytes)
@@ -127,6 +132,7 @@ fn model(app: &App) -> Model {
         .build()
         .unwrap();
 
+    // Create the performer window
     let performer_window_id = app
         .new_window()
         .title("Auto-훈민정음 0.1.0 Performer")
@@ -150,6 +156,7 @@ fn model(app: &App) -> Model {
         std::process::exit(1);
     };
 
+    // Print the scale factor for the windows
     println!(
         "Audience window scale factor: {}",
         audience_window.scale_factor()
@@ -159,6 +166,8 @@ fn model(app: &App) -> Model {
         "Performer window scale factor: {}",
         performer_window.scale_factor()
     );
+
+    // Set up the draws for the windows
     let audience_draw = nannou::Draw::new();
     let performer_draw = nannou::Draw::new();
 
@@ -171,6 +180,8 @@ fn model(app: &App) -> Model {
         config.rendering_main.texture_height,
         config.rendering_main.texture_samples,
     );
+
+    // Set up the reshapers for the windows
     let audience_reshaper = rendering.create_reshaper_for_post_processed(device, &audience_window);
     let performer_reshaper =
         rendering.create_reshaper_for_post_processed(device, &performer_window);
@@ -183,7 +194,7 @@ fn model(app: &App) -> Model {
         .left_justify()
         .build();
 
-    // Initialize three text grids
+    // Initialize three text grids specific to this performance
     let grids = init_three_grids(
         app,
         &config.grid,
@@ -202,7 +213,7 @@ fn model(app: &App) -> Model {
         performer_rect.top() - 10.0,
     ));
 
-    // Intro image
+    // Load the intro image
     let mut intro_image = IntroImage::new(&config.paths.intro_image);
     intro_image.load(app);
 
@@ -250,6 +261,7 @@ fn main() {
     nannou::app(model).update(update).run();
 }
 
+// The main update loop, runs at 60Hz per Nannou
 fn update(app: &App, model: &mut Model, _update: Update) {
     // FPS update
     if model.show_fps {
@@ -316,7 +328,11 @@ fn performer_view(app: &App, model: &Model, frame: Frame) {
     let _ = model.performer_draw.to_frame(app, &frame);
 }
 
+// The audience view is the main window that displays the performance, that the audience sees.
+// Its main job is to display the post-processed texture view, resized to the venue resolution.\
+// A debug view shows the bounds of the window and the axes at the origin.
 fn audience_view(app: &App, model: &Model, frame: Frame) {
+    // Clear the audience draw before starting
     model.audience_draw.reset();
 
     // Get the post-processed texture view
@@ -331,6 +347,7 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
     if model.intro_image.is_visible() {
         let rect = app.window(model.audience_window_id).unwrap().rect();
 
+        // Draw intro image, sized to audience window
         model.intro_image.draw(&model.audience_draw, rect);
     }
 
@@ -344,6 +361,8 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
 }
 
 // ****************************** View functions ***********************************
+
+// Update each text grid
 fn update_grids(app: &App, model: &mut Model) {
     for grid in model.grids.iter_mut() {
         grid.update(
@@ -358,6 +377,7 @@ fn update_grids(app: &App, model: &mut Model) {
     }
 }
 
+// Initialize three text grids specific to this performance
 fn init_three_grids(
     app: &App,
     grid_config: &GridConfig,
@@ -424,6 +444,9 @@ fn init_three_grids(
 
 // ****************************** Controller functions ******************************
 
+// This function is a controller that coordinates the different services.
+// Receive WebSocket messages from the client via the HMJServer.
+// Trigger functionality among the various services.
 fn receive_hmjmessage(model: &mut Model) {
     // Receive WebSocket messages
     while let Some(HMJMessageWrapper {
@@ -536,6 +559,7 @@ fn receive_hmjmessage(model: &mut Model) {
     }
 }
 
+// Handle moderator events from the GemmaService
 fn handle_moderator_events(model: &mut Model) {
     while let Ok(event) = model.gemma_rx.try_recv() {
         if let GemmaEvent::ModeratorChooses(id) = event {
@@ -562,6 +586,7 @@ fn handle_moderator_events(model: &mut Model) {
 
 // *************************** Rendering and Capture *****************************
 
+// Render the scene to texture and post-process with Nnpipe
 fn render_and_post(app: &App, model: &mut Model) {
     // Get the window device and queue
     let window = app.main_window();
@@ -575,6 +600,8 @@ fn render_and_post(app: &App, model: &mut Model) {
 
 // ************************ Performer HUD  *************************************
 
+// Draws the audience view debug mode -- a rectangle showing the bounds of the window,
+// and the axes at the center origin.
 fn draw_debug(app: &App, model: &Model) {
     let draw = &model.audience_draw;
     let rect = app.window(model.audience_window_id).unwrap().rect();
@@ -598,6 +625,9 @@ fn draw_debug(app: &App, model: &Model) {
         .no_fill();
 }
 
+// Draws the performer view HUD.
+// A grid showing the squares the human grid to help with spacing, and an indicator for the human's turn.
+// Also the current cursor position.
 fn draw_hud(app: &App, model: &Model) {
     let Some(grid) = model.grids.iter().find(|grid| grid.id == "Human") else {
         println!("No human grid found");
@@ -700,6 +730,7 @@ fn draw_hud(app: &App, model: &Model) {
 
 // ************************ Main window input  *************************************
 
+// Shortcut keys are activated when the performer window is focused.
 fn key_pressed(app: &App, model: &mut Model, key: Key) {
     match key {
         Key::Key0 => {
@@ -756,6 +787,8 @@ impl Drop for Model {
     }
 }
 
+// This enum tracks whether it's the human's turn.
+// It's set to Error if the API returns a blank response.
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
 enum HumansTurn {
     True,

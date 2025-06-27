@@ -1,18 +1,19 @@
 // src/services/sequencer
 //
 //
+// Desconstruct and parse hangeul characters and send OSC messages
 
 use crate::{config::OscSendConfig, osc::OscSender, views::grid::CharacterEntity};
 use std::time::Instant;
 
 pub struct Sequencer {
-    id: String,
-    pub is_sending: bool,
-    beat_count: usize,
-    last_clock_time: Instant,
-    pub current_idx: usize, // this increments at the START OF BEAT, not after read.
-    characters: Vec<CharacterEntity>,
-    osc_sender: OscSender,
+    id: String,               // id should be same as id of the grid that owns this sequencer
+    pub is_sending: bool,     // when false, no OSC messages are sent
+    beat_count: usize,        // the number of beats that have passed
+    last_clock_time: Instant, // the time of the last clock tick
+    pub current_idx: usize,   // this increments at the START OF BEAT, not after read.
+    characters: Vec<CharacterEntity>, // the characters to display
+    osc_sender: OscSender,    // the OSC sender to send messages to the grid
 }
 
 impl Sequencer {
@@ -38,12 +39,13 @@ impl Sequencer {
         // track the time
         self.increment();
 
-        // process character
+        // process character: deconstruct the word into component jamo and send OSC message of each jamo
         if let Some(ch) = self.get_character() {
             // do nothing if not hangeul
             if hangeul::is_hangeul(ch as u32) {
                 self.send_commands(decompose_character(ch));
 
+            // handle punctuation.
             // punctuation that makes it here has been pre-filtered by the grid.
             // so we can just send it as is
             } else if ch.is_ascii_punctuation() {
@@ -53,21 +55,18 @@ impl Sequencer {
         }
     }
 
+    // increment is called on every beat
     fn increment(&mut self) {
         self.beat_count += 1;
         self.current_idx += 1;
         self.last_clock_time = Instant::now();
     }
 
+    // get the next visible character
     fn get_character(&mut self) -> Option<char> {
-        let visible_chars: Vec<_> = self
-            .characters
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.is_visible)
-            .collect();
+        let visible_chars: Vec<_> = self.characters.iter().filter(|c| c.is_visible).collect();
 
-        // return early if no chars are visible
+        // return None if no chars are visible
         if visible_chars.is_empty() {
             return None;
         }
@@ -77,11 +76,12 @@ impl Sequencer {
             self.current_idx = 0;
         }
 
-        let (_, entity) = visible_chars[self.current_idx];
-
+        // return the character at the current index
+        let entity = visible_chars[self.current_idx];
         Some(entity.character)
     }
 
+    // send the OSC messages
     fn send_commands(&self, chars: Vec<char>) {
         // Don't send if the self flag is false
         if !self.is_sending {
@@ -124,30 +124,31 @@ impl Sequencer {
     }
 }
 
+// decompose a hangeul character into a vector of component jamo
 fn decompose_character(ch: char) -> Vec<char> {
+    // if not a hangeul syllable,
+    // return a vector with the original character
     if !hangeul::is_syllable(ch as u32) {
         return vec![ch];
     }
 
-    //println!("Original char: {}", ch);
-
-    // Unwrap the hangeul::Decomposed type
+    // Use the hangeul crate to decompose the character into its component jamo,
+    // transform the hangeul::Decomposed tuple (char, char, Option<char>) into a vector of chars
     if let Ok(result) = hangeul::decompose_char(&ch) {
-        // process (char, char, Option<char>)
         if result.2.is_none() {
             return vec![result.0, result.1];
         } else {
             return vec![result.0, result.1, result.2.unwrap()];
         }
     }
-
+    // return an empty Vec if decomposition fails
     Vec::new()
 }
 
-// 12592 is the hangeul offset
+// convert a hangeul character to an i32
+// 12592 is the hangeul offset (we formerly subtracted the offset but no longer)
 fn hangeul_to_i32(ch: char) -> i32 {
-    let result = ch as u32; //- 12592;
-                            //println!("Character {}: {}", ch, result);
+    let result = ch as u32;
 
     result as i32
 }

@@ -1,6 +1,6 @@
 // src/events/bus.rs
 //
-// Event bus
+// All event channels are defined here.
 
 pub use crate::{
     server::ServerEvent,

@@ -1,13 +1,15 @@
 // src/services/convo.rs
 //
-// Interface for ConversationManager
+// Interface for the ConversationManager data model
 
 use crate::events::{EventBus, GemmaEvent, ServerEvent, TranslationEvent};
 use crate::models::{Conversation, ConversationManager, ConvoItem};
 
 use tokio::sync::broadcast;
 
-// Events interface
+// ConvoEvents are emitted by ConversationService to notify subscribers of changes to the
+// ConversationManager data model. Subscribers generally expect a ConvoEvent as a response
+// to a request for ConversationService to modify the Conversation data.
 #[derive(Clone, Debug)]
 pub enum ConvoEvent {
     ItemAdded(usize, ConvoItem),      // key, HistoryItem
@@ -15,6 +17,11 @@ pub enum ConvoEvent {
     SendConvoCommand(String, String), // Request to send message (client_id, message)
 }
 
+// ConversationService is the interface for the ConversationManager data model.
+// It is responsible for managing the ConversationManager data model and
+// notifying subscribers of changes to the ConversationManager data model.
+// It is also responsible for receiving events from the EventBus and
+// triggering appropriate actions.
 pub struct ConversationService {
     conversation: ConversationManager,
 
@@ -80,14 +87,14 @@ impl ConversationService {
         while let Ok(event) = self.server_rx.try_recv() {
             match event {
                 // Send serialized conversation to WebSocket server for broadcast
-                ServerEvent::RequestConversation => {
+                ServerEvent::NeedConversation => {
                     let _ = self.event_tx.send(ConvoEvent::BroadcastConvoCommand(
                         self.conversation.serialize(),
                     ));
                 }
 
                 // Send serialized Conversation to WebSocket server to send to a specific client
-                ServerEvent::RequestConversationFor(client_id) => {
+                ServerEvent::NeedConversationFor(client_id) => {
                     let _ = self.event_tx.send(ConvoEvent::SendConvoCommand(
                         client_id,
                         self.conversation.serialize(),
@@ -108,6 +115,7 @@ impl ConversationService {
         ));
     }
 
+    // Add a translation to a ConvoItem model entry via the ConversationManager
     fn add_translation(&mut self, key: usize, translation: Option<String>) {
         self.conversation.add_translation(key, translation);
     }
@@ -117,14 +125,17 @@ impl ConversationService {
         &self.conversation.entries
     }
 
+    // Get an author's latest entry in the conversation history.
     pub fn get_latest_by_author(&self, author: &str) -> Option<&ConvoItem> {
         self.conversation.get_latest_by_author(author)
     }
 
+    // Create a new ConvoItem from an author and message.
     pub fn new_item(author: &str, message: &str) -> ConvoItem {
         ConvoItem::new(author, message)
     }
 
+    // Clear the conversation history.
     pub fn reset(&mut self) {
         self.conversation.reset();
     }

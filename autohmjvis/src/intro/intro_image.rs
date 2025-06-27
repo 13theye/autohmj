@@ -2,14 +2,14 @@
 //
 // A simple module to load and display the intro image on the screen before the performance starts.
 //
-// The source file should be placed in the assets directory.
+// The image file should be placed in the assets directory.
 
 use nannou::{prelude::*, wgpu::Texture};
 
 pub struct IntroImage {
-    texture: Option<Texture>,
-    image_path: String,
-    is_visible: bool,
+    texture: Option<Texture>, // the loaded image
+    image_path: String,       // the path to the image
+    is_visible: bool,         // whether the image is visible
 }
 
 impl IntroImage {

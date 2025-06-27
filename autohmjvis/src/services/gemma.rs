@@ -4,11 +4,7 @@
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    error::Error,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{collections::HashMap, error::Error};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
@@ -17,22 +13,21 @@ use crate::{
     models::{Conversation, ConvoItem},
 };
 
-// Event interface
+// These events are emitted by GemmaService to notify subscribers of responses from the Gemma API.
 #[derive(Clone, Debug)]
 pub enum GemmaEvent {
-    GemmaReceived(GemmaResponse),
-    ModeratorChooses(String),
-    DefaultEvent,
+    GemmaReceived(GemmaResponse), // A response from a Gemma instance has been received. Also includes the response.
+    ModeratorChooses(String),     // The ID of the persona who should speak next
 }
 
 pub struct GemmaService {
     pub instances: HashMap<GemmaPersona, GemmaInstance>, //<id, GemmaInstance>
-    pub moderator: GemmaModerator,
+    pub moderator: GemmaModerator, // a special instance of Gemma that decides who should speak next
 
-    // System prompt
+    // System prompt for all Gemma instances
     system_prompt: String,
 
-    // Tokio runtime
+    // Tokio runtime for async tasks
     runtime: Option<tokio::runtime::Runtime>,
 
     // Reqwest client
@@ -74,15 +69,19 @@ impl GemmaService {
         self.receive_all();
     }
 
+    // Send a request to a Gemma instance.
+    //
+    // If the persona is GemmaPersona::Moderator, the conversation history is sent to the moderator
+    // instance to decide who should speak next.
+    //
+    // If the persona is a regular Gemma instance, the new message is sent to the instance.
+    //
     pub fn send(
         &mut self,
-        gemma_persona: GemmaPersona,
-        new_item: Option<&ConvoItem>,
-        conversation: &Conversation,
+        gemma_persona: GemmaPersona, // the persona to send the request to
+        new_item: Option<&ConvoItem>, // the new message to send (if sending to a speaker persona)
+        conversation: &Conversation, // the conversation history
     ) -> Result<(), String> {
-        // Determine who should speak next
-        //let gemma_instance = self.instances.get(&self.next_instance()).unwrap();
-
         let gemma_instance: &GemmaInstance = if gemma_persona == GemmaPersona::Moderator {
             &self.moderator.instance
         } else {
@@ -95,7 +94,7 @@ impl GemmaService {
             gemma_instance
         };
 
-        // Generate API request content
+        // Format and Generate API request content
         let contents = if gemma_persona == GemmaPersona::Moderator {
             self.moderator.generate_contents(conversation)
         } else {
@@ -107,6 +106,7 @@ impl GemmaService {
         let api_key = self.api_key.clone();
         let model = gemma_instance.model.clone();
 
+        // Spawn a new async task to send the request to the Gemma API.
         if let Some(runtime) = &self.runtime {
             let tx = gemma_instance.tx.clone();
             let mut shutdown_rx = self.shutdown_tx.subscribe();
@@ -148,7 +148,10 @@ impl GemmaService {
         Ok(())
     }
 
-    // Collect Gemma responses and broadcast
+    // Collect Gemma responses and broadcast them to the EventBus.
+    //
+    // IMPORTANT: currently, the moderator assumes that there is only one human in the conversation
+    // Although the client/server can handle multiple humans, support for multiple humans is incomplete.
     pub fn receive_all(&mut self) {
         // Receive from moderator
         match self.moderator.instance.rx.try_recv() {
@@ -177,6 +180,7 @@ impl GemmaService {
             Err(_) => {} // ignore
         }
 
+        // Collect responses from all Gemma instances
         for instance in self.instances.values_mut() {
             match instance.rx.try_recv() {
                 Ok(Some(message)) => {
@@ -197,21 +201,6 @@ impl GemmaService {
     // Add a new Gemma Instance to the Manager
     pub fn add(&mut self, persona: GemmaPersona, instance: GemmaInstance) {
         self.instances.insert(persona, instance);
-    }
-
-    // A simple determination of next speaker, for now
-    fn next_instance(&self) -> GemmaPersona {
-        let time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let num = time % 2;
-        println!("Gemma Number: {}", num);
-        match num {
-            0 => GemmaPersona::Gemma1,
-            1 => GemmaPersona::Gemma2,
-            _ => GemmaPersona::Gemma1,
-        }
     }
 
     /**************************** Shutdown **************************************/
@@ -335,6 +324,8 @@ async fn generate_response(
     Err("No response generated".into())
 }
 
+// A GemmaInstance is a single instance of a Gemma persona.
+// It is used to send and receive messages to and from the Gemma API.
 #[derive(Debug)]
 pub struct GemmaInstance {
     pub id: String,
@@ -361,6 +352,8 @@ impl GemmaInstance {
         &self.personality.prompt
     }
 
+    // build the prompt for this instance
+    // the prompt includes the general system prompt and the specific personality prompt.
     fn build_prompt(&self, system_prompt: &str) -> String {
         system_prompt.to_owned() + " Personality: " + self.personality()
     }
@@ -368,8 +361,10 @@ impl GemmaInstance {
     // generate request content to be sent to this instance
     pub fn generate_contents(
         &self,
-        // This is used when messages were automatically sent to the AI upon pressing
-        // enter. Now, we only send the convo when performer presses the AI button.
+        // new_item is used when messages were automatically sent to the AI upon pressing
+        // enter, because the new item was not part of the conversation history.
+        // Now, we only send the convo when performer presses the AI button, after already
+        // entering the new_item into the conversation history.
         new_item: Option<&ConvoItem>,
         //
         conversation: &Conversation,
@@ -406,6 +401,7 @@ impl GemmaInstance {
             });
         }
 
+        // Add the new_item to the contents if it exists.
         if let Some(new_item) = new_item {
             // Add current message
             contents.push(RequestContent {
@@ -442,6 +438,10 @@ pub struct GemmaResponse {
     pub message: String,
 }
 
+// The different Gemma personas.
+//
+// Gemma1 and Gemma2 are the two regular Gemma instances.
+// Moderator is a special instance that decides who should speak next.
 #[derive(Hash, PartialEq, Eq, Debug, Clone, Copy)]
 pub enum GemmaPersona {
     Gemma1,
@@ -460,19 +460,31 @@ pub struct GemmaModerator {
 }
 
 impl GemmaModerator {
+    // Creating a new moderator is similar to creating a regular GemmaInstance, except that the
+    // personality prompt contains specific instructions on how to moderate the conversation.
     pub fn new(id: &str, personality: Personality, model: &str) -> Self {
         let instance = GemmaInstance::new(id, personality, model);
         Self { instance }
     }
 
+    // A shortcut for creating a moderator when a moderator instance is already created.
     pub fn from_gemma_instance(instance: GemmaInstance) -> Self {
         Self { instance }
     }
 
+    // Build the moderator prompt
     fn build_prompt(&self) -> String {
         self.instance.personality().to_owned()
     }
 
+    // Generate the contents for the moderator instance.
+    //
+    // The moderator instance is a special instance that receives the complete conversation history
+    // and responds with a single word: The ID of the persona who should speak next.
+    //
+    // The moderator instance is a special instance that receives the complete conversation history
+    // This function is similar to the one in GemmaInstance, except that all the conversation
+    // items are in the "user" role.
     fn generate_contents(&self, conversation: &Conversation) -> Vec<RequestContent> {
         // 1. Build the special moderator prompt
         let mut contents = vec![RequestContent {
@@ -510,14 +522,14 @@ struct GemmaRequest {
     generation_config: GenerationConfig,
 }
 
-// Safety Settings, of the content as defined by Gemini API
+// Safety Settings of the response content as defined by Gemini API
 #[derive(Debug, Serialize)]
 struct SafetySetting {
     category: String,
     threshold: String,
 }
 
-// Config settings, of the content as defined by Gemini API
+// Config settings, of the responsecontent as defined by Gemini API
 #[derive(Debug, Serialize)]
 struct GenerationConfig {
     temperature: f32,
