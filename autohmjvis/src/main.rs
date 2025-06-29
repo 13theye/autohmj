@@ -1,0 +1,797 @@
+// src/main.rs
+//
+// auto-hunminjeongak server and visualizer
+//
+
+use nannou::{prelude::*, text::*, wgpu::TextureReshaper};
+use nnpipe::*;
+use std::{
+    collections::HashMap,
+    fs,
+    sync::{Arc, RwLock},
+};
+use tokio::sync::broadcast;
+
+use autohmjvis::{
+    config::{AuthConfig, Config, GemmaConfig, GridConfig, OscSendConfig, SpeedConfig},
+    events::{EventBus, GemmaEvent},
+    fps::FpsManager,
+    intro::IntroImage,
+    models::{CommandMessage, HMJMessageWrapper},
+    server::HMJServer,
+    services::{ConversationService, GemmaPersona, GemmaService, TranslationService},
+    views::{BackgroundManager, TextGrid},
+};
+
+//const HUMAN_ID: &str = "Human";
+
+struct Model {
+    background: BackgroundManager, // handles background color and potential for transitions
+    intro_image: IntroImage,       // the intro image
+    text_layout: Layout,           // style and layout of text
+
+    // Services
+    convo: ConversationService,    // handles the conversation
+    translate: TranslationService, // handles translation
+    ai: GemmaService,              // handles the AI
+
+    // Conversation channel (for moderator)
+    gemma_rx: broadcast::Receiver<GemmaEvent>, // the channel for Gemma events
+    humans_turn: HumansTurn, // true if the moderator decides human should speak next
+
+    // Text Grids
+    grids: Vec<TextGrid>, // the onscreen text grids
+
+    // WebSockets for client
+    server: HMJServer,                                 // the WebSockets server
+    connections: Arc<RwLock<HashMap<String, String>>>, // a shared reference to live input and cursor position
+    cursor_positions: HashMap<String, usize>,          // the cursor position in the grid
+
+    // Fonts
+    korean_font: Font, // the font for Korean text
+    latin_font: Font,  // the font for Latin text
+
+    // Nannou API and rendering pipeline
+    rendering: Nnpipe, // the rendering pipeline
+
+    // Draws
+    draw: nannou::Draw,           // the main draw
+    audience_draw: nannou::Draw,  // the draw for the audience window
+    performer_draw: nannou::Draw, // the draw for the performer window
+
+    // Window's texture reshaper
+    audience_window_id: WindowId,
+    performer_window_id: WindowId,
+    audience_reshaper: TextureReshaper,
+    performer_reshaper: TextureReshaper,
+
+    // FPS
+    fps: FpsManager, // handles FPS calculations and display
+
+    // When true, displays more verbose messages in terminal
+    show_debug: bool,
+
+    // When true, displays FPS
+    show_fps: bool,
+}
+
+fn model(app: &App) -> Model {
+    // Load configs
+    // general config from the CONFIG.TOML file
+    let config = Config::load().expect("\nAuto훈민정음: FAILED TO LOAD CONFIG.TOML\n");
+    // Gemma API key from the /auth/key.toml file
+    let auth_config =
+        AuthConfig::load(&config.paths.auth).expect("\nAuto훈민정음: FAILED TO LOAD KEY.TOML\n");
+
+    // Gemma config from the /gemma/gemma.toml file
+    let gemma_config = GemmaConfig::load(&config.paths.gemma)
+        .expect("\nAuto훈민정음: FAILED TO LOAD GEMMA.TOML\n");
+
+    // Initialize event bus
+    let events = EventBus::default();
+
+    // Subscribe to Gemma events
+    let gemma_rx = events.gemma.subscribe();
+
+    // Initialize & start HMJServer
+    let mut server = HMJServer::new(config.server.port, &events);
+    server.start().expect("Failed to start HMJServer");
+
+    // Initialize connections
+    let connections = Arc::new(RwLock::new(HashMap::new()));
+
+    // Initialize services
+    let convo = ConversationService::new(&events);
+    let translate = TranslationService::new(&events);
+    let ai = GemmaService::new(&gemma_config, &auth_config.google.api_key, &events);
+
+    // --- Load Font for Nannou Draw (Hangeul) ---
+    // Assumes "assets/gulim.ttf" exists relative to the executable
+    // or relative to the project root if running with `cargo run`
+    let assets = app.assets_path().expect("Could not find assets directory");
+    let font_path = assets.join("gulim.ttf");
+    let font_bytes = fs::read(&font_path)
+        .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
+    let korean_font = Font::from_bytes(font_bytes)
+        .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
+
+    // --- Load Font for Nannou Draw (Latin) ---
+    let font_path = assets.join("gulim.ttf");
+    let font_bytes = fs::read(&font_path)
+        .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
+    let latin_font = Font::from_bytes(font_bytes)
+        .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
+
+    // Create main output window
+    let audience_window_id = app
+        .new_window()
+        .title("Auto-훈민정음 0.1.0")
+        .size(config.audience_window.width, config.audience_window.height)
+        .msaa_samples(1)
+        .view(audience_view)
+        .build()
+        .unwrap();
+
+    // Create the performer window
+    let performer_window_id = app
+        .new_window()
+        .title("Auto-훈민정음 0.1.0 Performer")
+        .size(
+            config.performer_window.width,
+            config.performer_window.height,
+        )
+        .msaa_samples(1)
+        .view(performer_view)
+        .key_pressed(key_pressed)
+        .build()
+        .unwrap();
+
+    let Some(audience_window) = app.window(audience_window_id) else {
+        eprintln!("Audience window not found. Exiting app.");
+        std::process::exit(1);
+    };
+
+    let Some(performer_window) = app.window(performer_window_id) else {
+        eprintln!("Performer window not found. Exiting app.");
+        std::process::exit(1);
+    };
+
+    // Print the scale factor for the windows
+    println!(
+        "Audience window scale factor: {}",
+        audience_window.scale_factor()
+    );
+
+    println!(
+        "Performer window scale factor: {}",
+        performer_window.scale_factor()
+    );
+
+    // Set up the draws for the windows
+    let audience_draw = nannou::Draw::new();
+    let performer_draw = nannou::Draw::new();
+
+    // Set up render texture
+    let draw = nannou::Draw::new();
+    let device = audience_window.device();
+    let rendering = Nnpipe::new(
+        device,
+        config.rendering_main.texture_width,
+        config.rendering_main.texture_height,
+        config.rendering_main.texture_samples,
+    );
+
+    // Set up the reshapers for the windows
+    let audience_reshaper = rendering.create_reshaper_for_post_processed(device, &audience_window);
+    let performer_reshaper =
+        rendering.create_reshaper_for_post_processed(device, &performer_window);
+
+    // Set up Text display style
+    let text_layout_builder = nannou::text::layout::Builder::default();
+    let text_layout = text_layout_builder
+        .line_spacing(15.0)
+        .wrap_by_word()
+        .left_justify()
+        .build();
+
+    // Initialize three text grids specific to this performance
+    let grids = init_three_grids(
+        app,
+        &config.grid,
+        &gemma_config,
+        &events,
+        connections.clone(),
+        &config.osc_send,
+        &config.speed,
+    );
+
+    // Set up FPS manager
+    let mut fps = FpsManager::new_with(false, false);
+    let performer_rect = performer_window.rect();
+    fps.set_draw_position(pt2(
+        performer_rect.left() + 40.0,
+        performer_rect.top() - 10.0,
+    ));
+
+    // Load the intro image
+    let mut intro_image = IntroImage::new(&config.paths.intro_image);
+    intro_image.load(app);
+
+    Model {
+        background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
+        intro_image,
+        text_layout,
+
+        convo,
+        translate,
+        ai,
+
+        gemma_rx,
+        humans_turn: HumansTurn::True,
+
+        grids,
+
+        korean_font,
+        latin_font,
+
+        audience_window_id,
+        performer_window_id,
+
+        audience_reshaper,
+        performer_reshaper,
+
+        draw,
+        audience_draw,
+        performer_draw,
+
+        server,
+        connections,
+        cursor_positions: HashMap::new(),
+
+        rendering,
+
+        fps,
+
+        show_fps: false,
+        show_debug: false,
+    }
+}
+
+fn main() {
+    nannou::app(model).update(update).run();
+}
+
+// The main update loop, runs at 60Hz per Nannou
+fn update(app: &App, model: &mut Model, _update: Update) {
+    // FPS update
+    if model.show_fps {
+        model.fps.update();
+    }
+
+    // Handle the background
+    model.background.draw(&model.draw, app.time);
+
+    // Update services
+    model.translate.update();
+    model.ai.update();
+    model.server.update();
+
+    // Handle Gemma Moderator events
+    handle_moderator_events(model);
+
+    // Receive incoming datagrams and update connections
+    receive_hmjmessage(model);
+
+    // Process any new conversation items
+    model.convo.update();
+
+    // Update & draw graphics
+    update_grids(app, model);
+
+    // Send to rendering engine and post processing
+    render_and_post(app, model);
+}
+
+// The view functions get a copy of the resized main texture, then draw UI/HUD elements over it.
+fn performer_view(app: &App, model: &Model, frame: Frame) {
+    // Clear the performer draw before starting
+    model.performer_draw.reset();
+
+    // Get the post-processed texture view
+    let _post_processed_view = model.rendering.get_post_processed_view();
+
+    // Update reshaper if needed (could be cached in Model)
+    model
+        .rendering
+        .draw_to_frame(&model.performer_reshaper, &frame);
+
+    // If audience is viewing intro image, show this message
+    if model.intro_image.is_visible() {
+        model
+            .performer_draw
+            .text("Intro Image Onscreen.\nSelect this window and press I to hide/show.")
+            .x_y(0.0, 0.0)
+            .wh(pt2(500.0, 500.0))
+            .font_size(50)
+            .color(RED);
+    }
+
+    // Handle FPS and origin display
+    if model.show_fps {
+        model.fps.draw(&model.performer_draw);
+    }
+
+    // Draw current cursor position
+    draw_hud(app, model);
+
+    // Then draw UI over it
+    let _ = model.performer_draw.to_frame(app, &frame);
+}
+
+// The audience view is the main window that displays the performance, that the audience sees.
+// Its main job is to display the post-processed texture view, resized to the venue resolution.\
+// A debug view shows the bounds of the window and the axes at the origin.
+fn audience_view(app: &App, model: &Model, frame: Frame) {
+    // Clear the audience draw before starting
+    model.audience_draw.reset();
+
+    // Get the post-processed texture view
+    let _post_processed_view = model.rendering.get_post_processed_view();
+
+    // Update reshaper if needed (could be cached in Model)
+    model
+        .rendering
+        .draw_to_frame(&model.audience_reshaper, &frame);
+
+    // Draw intro image if visible
+    if model.intro_image.is_visible() {
+        let rect = app.window(model.audience_window_id).unwrap().rect();
+
+        // Draw intro image, sized to audience window
+        model.intro_image.draw(&model.audience_draw, rect);
+    }
+
+    // Handle FPS and origin display
+    if model.show_debug {
+        draw_debug(app, model);
+    }
+
+    // Then draw UI over it
+    let _ = model.audience_draw.to_frame(app, &frame);
+}
+
+// ****************************** View functions ***********************************
+
+// Update each text grid
+fn update_grids(app: &App, model: &mut Model) {
+    for grid in model.grids.iter_mut() {
+        grid.update(
+            app.time,
+            &model.draw,
+            &model.text_layout,
+            &model.korean_font,
+            //&model.latin_font,
+            &model.korean_font,
+            &model.translate.translation_type,
+        );
+    }
+}
+
+// Initialize three text grids specific to this performance
+fn init_three_grids(
+    app: &App,
+    grid_config: &GridConfig,
+    gemma_config: &GemmaConfig,
+    events: &EventBus,
+    connections: Arc<RwLock<HashMap<String, String>>>,
+    osc_config: &OscSendConfig,
+    speed_config: &SpeedConfig,
+) -> Vec<TextGrid> {
+    // Get window size
+    let rect = app.main_window().rect();
+    let width = rect.w();
+    let height = rect.h();
+
+    let font_size = grid_config.font_size_text;
+    let cols = grid_config.cols;
+
+    let margin = grid_config.left_right_margin as f32;
+    let column_width = (font_size * 2 * cols as u32) as f32;
+
+    // Define three columns
+    let center_col = Rect::from_x_y_w_h(0.0, 0.0, column_width, height);
+    let left_col = Rect::from_x_y_w_h(-(column_width + margin), 0.0, column_width, height);
+    let right_col = Rect::from_x_y_w_h(column_width + margin, 0.0, column_width, height);
+
+    let human_grid = TextGrid::new(
+        "Human",
+        true,
+        grid_config,
+        (width, height),
+        &center_col,
+        events,
+        connections.clone(),
+        osc_config,
+        speed_config,
+    );
+
+    let gemma1_grid = TextGrid::new(
+        &gemma_config.persona_1.id,
+        false,
+        grid_config,
+        (width, height),
+        &left_col,
+        events,
+        connections.clone(),
+        osc_config,
+        speed_config,
+    );
+
+    let gemma2_grid = TextGrid::new(
+        &gemma_config.persona_2.id,
+        false,
+        grid_config,
+        (width, height),
+        &right_col,
+        events,
+        connections.clone(),
+        osc_config,
+        speed_config,
+    );
+
+    vec![gemma1_grid, human_grid, gemma2_grid]
+}
+
+// ****************************** Controller functions ******************************
+
+// This function is a controller that coordinates the different services.
+// Receive WebSocket messages from the client via the HMJServer.
+// Trigger functionality among the various services.
+fn receive_hmjmessage(model: &mut Model) {
+    // Receive WebSocket messages
+    while let Some(HMJMessageWrapper {
+        author,
+        message,
+        command,
+        cursor_position,
+    }) = model.server.try_recv_message()
+    {
+        // Handle convo messages
+        if let Some(message) = message {
+            // Update connections map for live display or finalize messages
+            if message.ends_with('\n') {
+                // Create convo item
+                let entry = ConversationService::new_item(&author, &message);
+
+                // Send to next AI speaker (disabled: now requires specific command)
+                //let _ = model.ai.send(&entry, model.convo.entries());
+
+                // Add message to conversation
+                model.convo.add(entry);
+
+                // Clear the buffer
+                model.connections.write().unwrap().remove(&author);
+                model.humans_turn = HumansTurn::False;
+            } else {
+                // Message is in progress
+                model
+                    .connections
+                    .write()
+                    .unwrap()
+                    .insert(author.to_owned(), message);
+                if let Some(cursor_position) = cursor_position {
+                    model.cursor_positions.insert(author, cursor_position);
+                }
+            }
+        }
+
+        // Handle command messages
+        if let Some(command) = command {
+            println!("Receive command: {:#?}", command);
+            match command {
+                CommandMessage::OscLeftSetting(setting) => {
+                    let Some(grid) = model.grids.iter_mut().find(|grid| grid.id == "Left") else {
+                        println!("No grid named Left");
+                        return;
+                    };
+                    println!("Setting Left OSC: {}", setting);
+                    grid.sequencer.is_sending = setting;
+                }
+                CommandMessage::OscHumanSetting(setting) => {
+                    let Some(grid) = model.grids.iter_mut().find(|grid| grid.id == "Human") else {
+                        println!("No grid named Human");
+                        return;
+                    };
+                    println!("Setting Human OSC: {}", setting);
+                    grid.sequencer.is_sending = setting;
+                }
+                CommandMessage::OscRightSetting(setting) => {
+                    let Some(grid) = model.grids.iter_mut().find(|grid| grid.id == "Right") else {
+                        println!("No grid named Right");
+                        return;
+                    };
+                    println!("Setting Right OSC: {}", setting);
+                    grid.sequencer.is_sending = setting;
+                }
+                CommandMessage::AISend(ai_id) => match ai_id.as_str() {
+                    "Left" => {
+                        let _ = model
+                            .ai
+                            .send(GemmaPersona::Gemma1, None, model.convo.entries());
+                    }
+                    "Right" => {
+                        let _ = model
+                            .ai
+                            .send(GemmaPersona::Gemma2, None, model.convo.entries());
+                    }
+                    "Both" => {
+                        let _ = model
+                            .ai
+                            .send(GemmaPersona::Gemma1, None, model.convo.entries());
+                        let _ = model
+                            .ai
+                            .send(GemmaPersona::Gemma2, None, model.convo.entries());
+                    }
+                    "Moderator" => {
+                        let _ = model
+                            .ai
+                            .send(GemmaPersona::Moderator, None, model.convo.entries());
+                    }
+                    _ => {
+                        println!("Unknown AI ID: {}", ai_id);
+                    }
+                },
+                CommandMessage::ClearGrid(grid_id) => {
+                    let Some(grid) = model.grids.iter_mut().find(|grid| grid.id == grid_id) else {
+                        println!("No grid named {}", grid_id);
+                        return;
+                    };
+                    grid.clear();
+                }
+                CommandMessage::ResetConversation => {
+                    model.convo.reset();
+                    for grid in model.grids.iter_mut() {
+                        grid.clear();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Handle moderator events from the GemmaService
+fn handle_moderator_events(model: &mut Model) {
+    while let Ok(event) = model.gemma_rx.try_recv() {
+        if let GemmaEvent::ModeratorChooses(id) = event {
+            println!("Moderator chooses: {:?}", id);
+            if id == "Human" {
+                model.humans_turn = HumansTurn::True;
+            } else {
+                let persona: GemmaPersona;
+                if id == "Left" {
+                    model.humans_turn = HumansTurn::False;
+                    persona = GemmaPersona::Gemma1;
+                    let _ = model.ai.send(persona, None, model.convo.entries());
+                } else if id == "Right" {
+                    model.humans_turn = HumansTurn::False;
+                    persona = GemmaPersona::Gemma2;
+                    let _ = model.ai.send(persona, None, model.convo.entries());
+                } else {
+                    model.humans_turn = HumansTurn::Error;
+                }
+            }
+        }
+    }
+}
+
+// *************************** Rendering and Capture *****************************
+
+// Render the scene to texture and post-process with Nnpipe
+fn render_and_post(app: &App, model: &mut Model) {
+    // Get the window device and queue
+    let window = app.main_window();
+    let device = window.device();
+    let queue = window.queue();
+
+    // Render the game to texture and post-process
+    model.rendering.render_scene(device, queue, &model.draw);
+    model.rendering.post_process(device, queue);
+}
+
+// ************************ Performer HUD  *************************************
+
+// Draws the audience view debug mode -- a rectangle showing the bounds of the window,
+// and the axes at the center origin.
+fn draw_debug(app: &App, model: &Model) {
+    let draw = &model.audience_draw;
+    let rect = app.window(model.audience_window_id).unwrap().rect();
+
+    // Draw (+,+) axes
+    draw.line()
+        .points(pt2(0.0, 0.0), pt2(25.0, 0.0))
+        .color(RED)
+        .stroke_weight(1.0);
+    draw.line()
+        .points(pt2(0.0, 0.0), pt2(0.0, 25.0))
+        .color(BLUE)
+        .stroke_weight(1.0);
+
+    // Draw rect bounds
+    draw.rect()
+        .xy(pt2(0.0, 0.0))
+        .wh(pt2(rect.w(), rect.h()))
+        .stroke(rgba(0.5, 1.0, 0.5, 0.5)) // Green outline
+        .stroke_weight(2.0)
+        .no_fill();
+}
+
+// Draws the performer view HUD.
+// A grid showing the squares the human grid to help with spacing, and an indicator for the human's turn.
+// Also the current cursor position.
+fn draw_hud(app: &App, model: &Model) {
+    let Some(grid) = model.grids.iter().find(|grid| grid.id == "Human") else {
+        println!("No human grid found");
+        return;
+    };
+
+    let draw = &model.performer_draw;
+    let performer_rect = app.window(model.performer_window_id).unwrap().rect();
+
+    // scale grid dimensions to match window size
+    let scale_x = performer_rect.w() / model.rendering.width as f32;
+    let scale_y = performer_rect.h() / model.rendering.height as f32;
+
+    let origin_x = grid.origin_x * scale_x;
+    let message_y = grid.message_y * scale_y;
+    let rows = grid.rows;
+    let cols = grid.cols;
+
+    let cell_width = grid.cell_width * scale_x;
+    let cell_height = grid.cell_height * scale_y;
+
+    let grid_color = rgba(0.0, 0.3, 0.0, 1.0);
+
+    let next_speaker_indicator_color = if model.humans_turn == HumansTurn::True {
+        rgba(0.0, 0.83, 0.0, 1.0)
+    } else if model.humans_turn == HumansTurn::False {
+        rgba(0.72, 0.0, 0.0, 1.0)
+    } else {
+        rgba(0.8, 0.8, 0.0, 1.0)
+    };
+
+    // Draw next speaker indicator
+    draw.ellipse()
+        .x_y(0.0, message_y + 80.0)
+        .w_h(20.0, 20.0)
+        .color(next_speaker_indicator_color);
+
+    for row in 0..=rows {
+        draw.line()
+            .points(
+                pt2(
+                    origin_x - cell_width / 2.0,
+                    (message_y + cell_height / 2.0) - row as f32 * cell_height,
+                ),
+                pt2(
+                    (origin_x - cell_width / 2.0) + cols as f32 * cell_width,
+                    (message_y + cell_height / 2.0) - row as f32 * cell_height,
+                ),
+            )
+            .color(grid_color)
+            .stroke_weight(1.0);
+    }
+
+    for col in 0..=cols {
+        draw.line()
+            .points(
+                pt2(
+                    (origin_x - cell_width / 2.0) + col as f32 * cell_width,
+                    message_y + cell_height / 2.0,
+                ),
+                pt2(
+                    (origin_x - cell_width / 2.0) + col as f32 * cell_width,
+                    (message_y + cell_height / 2.0) - rows as f32 * cell_height,
+                ),
+            )
+            .color(grid_color)
+            .stroke_weight(1.0);
+    }
+
+    // scale & draw the cursor position
+    let Some(cursor_position) = model.cursor_positions.get(&grid.id) else {
+        return;
+    };
+
+    let cursor_grid_pos = (cursor_position / grid.cols, cursor_position % grid.cols);
+    let cursor_pos = grid.place_char_at(cursor_grid_pos.0, cursor_grid_pos.1);
+
+    let cell_width = grid.cell_width * scale_x;
+    let cell_height = grid.cell_height * scale_y;
+
+    let cursor_length = cell_width - 2.0;
+    let scaled_pos = cursor_pos * pt2(scale_x, scale_y);
+
+    // Use these for a horizontal cursor underneath
+    let start_point = pt2(
+        scaled_pos.x - cursor_length / 2.0,
+        scaled_pos.y - cell_height / 2.0,
+    );
+    let end_point = pt2(
+        scaled_pos.x + cursor_length / 2.0,
+        scaled_pos.y - cell_height / 2.0,
+    );
+
+    // Draw a horizontal cursor line
+    draw.line()
+        .points(start_point, end_point)
+        .color(rgba(1.0, 1.0, 1.0, 1.0))
+        .stroke_weight(2.0); // Made thicker for visibility
+}
+
+// ************************ Main window input  *************************************
+
+// Shortcut keys are activated when the performer window is focused.
+fn key_pressed(app: &App, model: &mut Model, key: Key) {
+    match key {
+        Key::Key0 => {
+            model.grids[0].sequencer.is_sending = !model.grids[0].sequencer.is_sending;
+            println!("Grid 0 send OSC: {}", model.grids[0].sequencer.is_sending);
+        }
+        Key::Key1 => {
+            model.grids[1].sequencer.is_sending = !model.grids[1].sequencer.is_sending;
+            println!("Grid 1 send OSC: {}", model.grids[1].sequencer.is_sending);
+        }
+        Key::Key2 => {
+            model.grids[2].sequencer.is_sending = !model.grids[2].sequencer.is_sending;
+            println!("Grid 2 send OSC: {}", model.grids[2].sequencer.is_sending);
+        }
+        Key::Key5 => {
+            model.translate.set_to_korean();
+            println!("Translation set to Korean");
+        }
+        Key::Key6 => {
+            model.translate.set_to_english();
+            println!("Translation set to English");
+        }
+        /*
+        Key::Key7 => {
+            model.translate.set_to_french();
+            println!("Translation set to French");
+        }
+         */
+        Key::P => {
+            model.show_fps = !model.show_fps;
+            model.fps.toggle();
+        }
+        Key::D => {
+            model.show_debug = !model.show_debug;
+        }
+        Key::I => {
+            model.intro_image.toggle_visible();
+        }
+        Key::Escape => {
+            //shutdown(model);
+            app.quit();
+        }
+        _ => {}
+    }
+}
+
+// ************************ Graceful Shutdown  *************************************
+
+impl Drop for Model {
+    fn drop(&mut self) {
+        // Modules shut themselves down gracefully.
+
+        println!("\nShutting down AutoHMJVis...");
+    }
+}
+
+// This enum tracks whether it's the human's turn.
+// It's set to Error if the API returns a blank response.
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+enum HumansTurn {
+    True,
+    False,
+    Error,
+}

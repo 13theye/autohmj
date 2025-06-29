@@ -1,0 +1,60 @@
+# config.toml
+[server]
+port = 50001
+
+[osc_send]
+# OSC receiver's IP address (String)
+target_addr = "127.0.0.1"
+# OSC receiver's port.
+target_port = 45602
+
+[speed]
+bpm = 236
+
+[audience_window]
+# The size of the monitoring window.
+# Currently scaling to 1/2 of texture resolution
+width = 1920
+height = 1080
+
+[performer_window]
+# The size of the performer window.
+width = 1440
+height = 810
+
+[grid]
+font_size_text = 60
+font_size_translation = 40
+rows = 8
+cols = 8
+# margin between top of window and beginning of text grid: (Int)
+top_margin = 200
+# margin between end of text grid and translation: (Int)
+bottom_margin = 100
+left_right_margin = 350
+
+[paths]
+#paths are relative to executable directory
+# directory to save recordings:
+output_directory = "frames"
+# directory for key.toml: secret keys
+auth = "auth"
+# directory for gemma.toml: Gemma AI config:
+gemma = "gemma"
+# path to intro image:
+intro_image = "intro.png"
+
+[rendering_main]
+texture_width = 3840
+texture_height = 2160
+# Please don't change these
+texture_samples = 1
+arc_resolution = 25
+
+
+[frame_recorder]
+# Settings for the frame recorder
+# Frame limit of 30000 frames is about 16m40s at 30fps
+# Frame limit of 50000 frames is about 13m53s at 60fps
+frame_limit = 50000
+fps = 30
