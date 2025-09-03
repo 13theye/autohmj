@@ -6,6 +6,7 @@
 use nannou::{prelude::*, text::*, wgpu::TextureReshaper};
 use nnpipe::*;
 use std::{
+    cell::RefCell,
     collections::HashMap,
     fs,
     sync::{Arc, RwLock},
@@ -52,7 +53,7 @@ struct Model {
     latin_font: Font,  // the font for Latin text
 
     // Nannou API and rendering pipeline
-    rendering: Nnpipe, // the rendering pipeline
+    rendering: RefCell<Nnpipe>, // the rendering pipeline
 
     // Draws
     draw: nannou::Draw,           // the main draw
@@ -174,7 +175,7 @@ fn model(app: &App) -> Model {
     // Set up render texture
     let draw = nannou::Draw::new();
     let device = audience_window.device();
-    let rendering = Nnpipe::new(
+    let mut rendering = Nnpipe::new(
         device,
         config.rendering_main.texture_width,
         config.rendering_main.texture_height,
@@ -185,6 +186,37 @@ fn model(app: &App) -> Model {
     let audience_reshaper = rendering.create_reshaper_for_post_processed(device, &audience_window);
     let performer_reshaper =
         rendering.create_reshaper_for_post_processed(device, &performer_window);
+
+    // Set up effects pipeline
+    let lo_config = TextureConfig {
+        width: config.rendering_main.texture_width / 2,
+        height: config.rendering_main.texture_height / 2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+    };
+
+    let med_config = TextureConfig {
+        width: config.rendering_main.texture_width,
+        height: config.rendering_main.texture_height,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+    };
+
+    let hi_config = TextureConfig {
+        width: config.rendering_main.texture_width,
+        height: config.rendering_main.texture_height,
+        format: wgpu::TextureFormat::Rgba16Float,
+    };
+
+    let effects = PipelineBuilder::new()
+        .name("Particle Effects Pipeline")
+        .brightness_extract(med_config, 0.5)
+        .downsample(lo_config)
+        .gaussian_blur_passes(lo_config, 2, 2.0, 5.0)
+        .bloom_composite_with_curve(hi_config, 2.0, 3.0)
+        .build(device);
+
+    if let Ok(effect) = effects {
+        rendering.add_multi_pipeline("effects", effect);
+    }
 
     // Set up Text display style
     let text_layout_builder = nannou::text::layout::Builder::default();
@@ -248,7 +280,7 @@ fn model(app: &App) -> Model {
         connections,
         cursor_positions: HashMap::new(),
 
-        rendering,
+        rendering: RefCell::new(rendering),
 
         fps,
 
@@ -268,9 +300,6 @@ fn update(app: &App, model: &mut Model, _update: Update) {
         model.fps.update();
     }
 
-    // Handle the background
-    model.background.draw(&model.draw, app.time);
-
     // Update services
     model.translate.update();
     model.ai.update();
@@ -287,9 +316,6 @@ fn update(app: &App, model: &mut Model, _update: Update) {
 
     // Update & draw graphics
     update_grids(app, model);
-
-    // Send to rendering engine and post processing
-    render_and_post(app, model);
 }
 
 // The view functions get a copy of the resized main texture, then draw UI/HUD elements over it.
@@ -298,11 +324,12 @@ fn performer_view(app: &App, model: &Model, frame: Frame) {
     model.performer_draw.reset();
 
     // Get the post-processed texture view
-    let _post_processed_view = model.rendering.get_post_processed_view();
+    let _post_processed_view = model.rendering.borrow().get_post_processed_view();
 
     // Update reshaper if needed (could be cached in Model)
     model
         .rendering
+        .borrow()
         .draw_to_frame(&model.performer_reshaper, &frame);
 
     // If audience is viewing intro image, show this message
@@ -332,16 +359,30 @@ fn performer_view(app: &App, model: &Model, frame: Frame) {
 // Its main job is to display the post-processed texture view, resized to the venue resolution.\
 // A debug view shows the bounds of the window and the axes at the origin.
 fn audience_view(app: &App, model: &Model, frame: Frame) {
+    // Begin rendering context
+    {
+        let mut rendering = model.rendering.borrow_mut();
+
+        let window = app.main_window();
+        let device = window.device();
+        let mut encoder = rendering.create_command_encoder(device);
+        let queue = window.queue();
+
+        // Clear textures
+        rendering.encode_clear_all_textures(&mut encoder, wgpu::Color::BLACK);
+        rendering.encode_draw_commands(device, &mut encoder);
+
+        if let Err(e) = rendering.execute_named_pipeline("effects", device, &mut encoder) {
+            eprintln!("Error executing effects pipeline: {}", e);
+        }
+
+        rendering.submit_command_encoder(device, queue, encoder);
+
+        rendering.draw_to_frame(&model.audience_reshaper, &frame);
+    }
+
     // Clear the audience draw before starting
     model.audience_draw.reset();
-
-    // Get the post-processed texture view
-    let _post_processed_view = model.rendering.get_post_processed_view();
-
-    // Update reshaper if needed (could be cached in Model)
-    model
-        .rendering
-        .draw_to_frame(&model.audience_reshaper, &frame);
 
     // Draw intro image if visible
     if model.intro_image.is_visible() {
@@ -364,10 +405,11 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
 
 // Update each text grid
 fn update_grids(app: &App, model: &mut Model) {
+    let rendering = model.rendering.borrow();
     for grid in model.grids.iter_mut() {
         grid.update(
             app.time,
-            &model.draw,
+            &rendering.draw,
             &model.text_layout,
             &model.korean_font,
             //&model.latin_font,
@@ -584,20 +626,6 @@ fn handle_moderator_events(model: &mut Model) {
     }
 }
 
-// *************************** Rendering and Capture *****************************
-
-// Render the scene to texture and post-process with Nnpipe
-fn render_and_post(app: &App, model: &mut Model) {
-    // Get the window device and queue
-    let window = app.main_window();
-    let device = window.device();
-    let queue = window.queue();
-
-    // Render the game to texture and post-process
-    model.rendering.render_scene(device, queue, &model.draw);
-    model.rendering.post_process(device, queue);
-}
-
 // ************************ Performer HUD  *************************************
 
 // Draws the audience view debug mode -- a rectangle showing the bounds of the window,
@@ -634,12 +662,13 @@ fn draw_hud(app: &App, model: &Model) {
         return;
     };
 
+    let rendering = model.rendering.borrow();
     let draw = &model.performer_draw;
     let performer_rect = app.window(model.performer_window_id).unwrap().rect();
 
     // scale grid dimensions to match window size
-    let scale_x = performer_rect.w() / model.rendering.width as f32;
-    let scale_y = performer_rect.h() / model.rendering.height as f32;
+    let scale_x = performer_rect.w() / rendering.scene_texture.size()[0] as f32;
+    let scale_y = performer_rect.h() / rendering.scene_texture.size()[1] as f32;
 
     let origin_x = grid.origin_x * scale_x;
     let message_y = grid.message_y * scale_y;
