@@ -18,6 +18,7 @@ use crate::{
 };
 
 // If punctuation is not on this list, it will be hidden from the grid
+#[allow(dead_code)]
 const ALLOWED_PUNCTUATION: &[char] = &['?', '!', ':', ';', ',', '"', '\''];
 
 // Wraps display state information for a character

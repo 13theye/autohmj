@@ -20,6 +20,7 @@ pub enum TranslationEvent {
 pub struct TranslationService {
     translate: Arc<Translate>,             // Translation API entry point
     pub translation_type: TranslationType, // the destination language
+    pub enabled: bool,                     // whether translation is enabled
 
     // Asynchronous translation
     pub runtime: Option<tokio::runtime::Runtime>, // the runtime for the translation
@@ -35,7 +36,7 @@ pub struct TranslationService {
 }
 
 impl TranslationService {
-    pub fn new(events: &EventBus) -> Self {
+    pub fn new(events: &EventBus, enabled: bool) -> Self {
         // Set up eventbus send
         let event_tx = events.translation.clone();
 
@@ -55,6 +56,7 @@ impl TranslationService {
         Self {
             translate: Arc::new(Translate::default()),
             translation_type: TranslationType::ToEnglish,
+            enabled,
             runtime: Some(translation_runtime),
             translation_tx,
             translation_rx,
@@ -71,6 +73,11 @@ impl TranslationService {
 
     // Translation services listens for a new ConvoItem and then attempts to translate the message.
     fn process_events(&mut self) {
+        // Skip processing if translation is disabled
+        if !self.enabled {
+            return;
+        }
+
         while let Ok(event) = self.history_rx.try_recv() {
             if let ConvoEvent::ItemAdded(key, item) = event {
                 if item.translation.is_none() && !item.message.trim().is_empty() {
@@ -141,6 +148,19 @@ impl TranslationService {
     }
     pub fn set_to_korean(&mut self) {
         self.translation_type = TranslationType::ToKorean;
+    }
+
+    // Toggle translation on/off
+    pub fn toggle_enabled(&mut self) {
+        self.enabled = !self.enabled;
+    }
+
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
     }
 
     fn shutdown(&mut self) {

@@ -21,6 +21,7 @@ pub struct Config {
     pub rendering_main: RenderMainConfig,
     pub server: ServerConfig,
     pub speed: SpeedConfig,
+    pub translation: TranslationConfig,
 }
 
 #[derive(Debug, Deserialize)]

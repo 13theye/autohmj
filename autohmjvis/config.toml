@@ -58,3 +58,7 @@ arc_resolution = 25
 # Frame limit of 50000 frames is about 13m53s at 60fps
 frame_limit = 50000
 fps = 30
+
+[translation]
+# Enable or disable automatic translation of conversation messages
+enabled = false

@@ -81,3 +81,8 @@ pub struct SpeedConfig {
 pub struct SystemPromptConfig {
     pub prompt: String,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct TranslationConfig {
+    pub enabled: bool,
+}

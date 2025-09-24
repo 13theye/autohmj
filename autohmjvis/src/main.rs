@@ -27,9 +27,10 @@ use autohmjvis::{
 //const HUMAN_ID: &str = "Human";
 
 struct Model {
+    #[allow(dead_code)]
     background: BackgroundManager, // handles background color and potential for transitions
-    intro_image: IntroImage,       // the intro image
-    text_layout: Layout,           // style and layout of text
+    intro_image: IntroImage, // the intro image
+    text_layout: Layout,     // style and layout of text
 
     // Services
     convo: ConversationService,    // handles the conversation
@@ -50,13 +51,15 @@ struct Model {
 
     // Fonts
     korean_font: Font, // the font for Korean text
-    latin_font: Font,  // the font for Latin text
+    #[allow(dead_code)]
+    latin_font: Font, // the font for Latin text
 
     // Nannou API and rendering pipeline
     rendering: RefCell<Nnpipe>, // the rendering pipeline
 
     // Draws
-    draw: nannou::Draw,           // the main draw
+    #[allow(dead_code)]
+    draw: nannou::Draw, // the main draw
     audience_draw: nannou::Draw,  // the draw for the audience window
     performer_draw: nannou::Draw, // the draw for the performer window
 
@@ -103,7 +106,7 @@ fn model(app: &App) -> Model {
 
     // Initialize services
     let convo = ConversationService::new(&events);
-    let translate = TranslationService::new(&events);
+    let translate = TranslationService::new(&events, config.translation.enabled);
     let ai = GemmaService::new(&gemma_config, &auth_config.google.api_key, &events);
 
     // --- Load Font for Nannou Draw (Hangeul) ---
@@ -787,7 +790,16 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
             model.translate.set_to_french();
             println!("Translation set to French");
         }
-         */
+
+        Key::T => {
+            model.translate.toggle_enabled();
+            if model.translate.is_enabled() {
+                println!("Translation enabled");
+            } else {
+                println!("Translation disabled");
+            }
+        }
+        */
         Key::P => {
             model.show_fps = !model.show_fps;
             model.fps.toggle();
