@@ -25,7 +25,6 @@ use tokio::sync::broadcast;
 pub struct Model {
     pub background: BackgroundManager, // handles background color and potential for transitions
     pub intro_image: IntroImage,       // the intro image
-    pub text_layout: Layout,           // style and layout of text
 
     // Services
     pub convo: ConversationService,    // handles the conversation

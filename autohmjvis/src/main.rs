@@ -179,15 +179,6 @@ fn model(app: &App) -> Model {
         rendering.add_multi_pipeline("effects", effect);
     }
 
-    // Set up Text display style
-    let text_layout_builder = nannou::text::layout::Builder::default();
-    let text_layout = text_layout_builder
-        .line_spacing(15.0)
-        .font_size(40)
-        .wrap_by_word()
-        .center_justify()
-        .build();
-
     // Initialize three ContentManagers specific to this performance
     let content = init_three_content_managers(&events, connections.clone(), &gemma_config);
 
@@ -215,7 +206,6 @@ fn model(app: &App) -> Model {
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         intro_image,
-        text_layout,
 
         convo,
         translate,
@@ -347,10 +337,10 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
         model.grids.iter().for_each(|grid| {
             grid.draw(
                 &rendering.draw,
-                &model.text_layout,
                 &model.korean_font,
                 &model.latin_font,
                 std::time::Instant::now(),
+                model.show_debug,
             );
         });
 

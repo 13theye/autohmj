@@ -97,8 +97,14 @@ impl GridCell {
         let size = vec2(grid_params.cell_width, grid_params.cell_height);
 
         let origin = vec2(
-            grid_params.rect().top_right().x - (row_col.1 as f32 * size.x) + (size.x / 2.0),
-            grid_params.rect().top_right().y - (row_col.0 as f32 * size.y) + (size.y / 2.0),
+            grid_params.rect().top_right().x
+                - (row_col.1 as f32 * grid_params.grid_line_stroke)
+                - (row_col.1 as f32 * size.x)
+                - (size.x / 2.0),
+            grid_params.rect().top_right().y
+                - (row_col.0 as f32 * grid_params.grid_line_stroke)
+                - (row_col.0 as f32 * size.y)
+                - (size.y / 2.0),
         );
 
         Self {
@@ -108,16 +114,26 @@ impl GridCell {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &self,
         draw: &Draw,
-        text_layout: &Layout,
+        grid_text_layout: &Layout,
+        _translation_text_layout: &Layout,
         font: &Font,
         alt_font: &Font,
         now: Instant,
+        show_debug: bool,
     ) {
         self.draw_background(draw);
-        self.draw_char(draw, text_layout, font, alt_font, now);
+        self.draw_char(draw, grid_text_layout, font, alt_font, now);
+
+        if show_debug {
+            draw.ellipse()
+                .xy(self.params.origin)
+                .radius(5.0)
+                .color(GREEN);
+        }
     }
 
     pub fn draw_background(&self, draw: &Draw) {
@@ -130,7 +146,7 @@ impl GridCell {
     pub fn draw_char(
         &self,
         draw: &Draw,
-        text_layout: &Layout,
+        layout: &Layout,
         font: &Font,
         alt_font: &Font,
         now: Instant,
@@ -164,7 +180,7 @@ impl GridCell {
             }
 
             // Apply animation factors to size and color
-            let display_size = (text_layout.font_size as f32 * size_factor) as u32;
+            let display_size = (layout.font_size as f32 * size_factor) as u32;
             let display_color = rgba(
                 (character.color.red * color_brightness).min(1.0),
                 (character.color.green * color_brightness).min(1.0),

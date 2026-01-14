@@ -30,8 +30,8 @@ width = 1440
 height = 810
 
 [grid]
-font_size_text = 60
-font_size_translation = 40
+font_size_text = 100
+font_size_translation = 70
 
 grid_rows = 11
 grid_cols = 8
@@ -61,13 +61,6 @@ gemma = "gemma"
 intro_image = "intro.png"
 
 
-[frame_recorder]
-# Settings for the frame recorder
-# Frame limit of 30000 frames is about 16m40s at 30fps
-# Frame limit of 50000 frames is about 13m53s at 60fps
-frame_limit = 50000
-fps = 30
-
 [translation]
 # Enable or disable automatic translation of conversation messages
-enabled = false
+enabled = true

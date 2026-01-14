@@ -104,18 +104,10 @@ impl ContentManager {
         ));
     }
 
-    // This function listens for ItemAdded messages from the ConversationService. If the
-    // author of the message is this grid's author, it reads that message and generates
-    // CharacterEntities from the the message.
-    //
-    // If the author is an AI, we know that there is only one way to handle the content:
-    // run the "typing" animation and feed the currently visible characters to the Sequencer.
-    //
-    // If the author is human, there are two possibilities:
-    // 1. As above
-    // 2. Message is currently "in progress" -- so need need to handle the input via
-    // ...the Connections HashMap in Main.
-
+    /// Listen for events from the ConversationManager.
+    /// - if the author of the new message is the same as this grid's author, update the latest message
+    ///   if it is different from the current latest message
+    /// - if a translation has been received, update the latest message with the translation
     fn process_events(&mut self) {
         while let Ok(event) = self.convo_rx.try_recv() {
             // Update latest message if author is same as this grid's author

@@ -5,12 +5,6 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-pub struct FrameRecorderConfig {
-    pub frame_limit: u32,
-    pub fps: u32,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct GoogleConfig {
     pub api_key: String,
 }

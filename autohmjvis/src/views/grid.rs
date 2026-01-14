@@ -37,10 +37,28 @@ pub struct TextGridParams {
     pub cell_width: f32,
     pub cell_height: f32,
     pub grid_line_stroke: f32,
+    pub grid_text_layout: Layout,
+    pub translation_text_layout: Layout,
 }
 
 impl TextGridParams {
     pub fn from_grid_config(grid_config: &GridConfig, origin: Vec2) -> Self {
+        let text_layout_builder = nannou::text::layout::Builder::default();
+        let grid_text_layout = text_layout_builder
+            .line_spacing(15.0)
+            .font_size(grid_config.font_size_text)
+            .wrap_by_word()
+            .center_justify()
+            .build();
+
+        let text_layout_builder = nannou::text::layout::Builder::default();
+        let translation_text_layout = text_layout_builder
+            .line_spacing(15.0)
+            .font_size(grid_config.font_size_translation)
+            .wrap_by_word()
+            .center_justify()
+            .build();
+
         Self {
             origin,
             rows: grid_config.grid_rows as usize,
@@ -53,6 +71,8 @@ impl TextGridParams {
             cell_width: grid_config.cell_width as f32,
             cell_height: grid_config.cell_height as f32,
             grid_line_stroke: grid_config.grid_line_stroke as f32,
+            grid_text_layout,
+            translation_text_layout,
         }
     }
 
@@ -61,7 +81,7 @@ impl TextGridParams {
     }
 
     pub fn height(&self) -> f32 {
-        self.cell_height * self.rows as f32 + self.grid_line_stroke * (self.rows as f32 - 1.0)
+        self.cell_height * self.rows as f32 + self.grid_line_stroke * (self.rows as f32 + 1.0)
     }
 
     pub fn rect(&self) -> Rect {
@@ -98,7 +118,7 @@ pub enum TextGridPosition {
 impl TextGridPosition {
     /// Returns the origin of the grid
     pub fn origin(&self, grid_config: &GridConfig) -> Vec2 {
-        let margin = grid_config.left_margin as f32 + 2.0 * grid_config.grid_line_stroke as f32;
+        let margin = grid_config.grid_spacing as f32 + 2.0 * grid_config.grid_line_stroke as f32;
         let cells_width = grid_config.cell_width as f32 * grid_config.grid_cols as f32
             + grid_config.grid_line_stroke as f32 * (grid_config.grid_cols as f32 - 1.0);
 
@@ -439,70 +459,30 @@ impl TextGrid {
             });
     }
 
-    pub fn draw(
-        &self,
-        draw: &Draw,
-        text_layout: &Layout,
-        font: &Font,
-        alt_font: &Font,
-        now: Instant,
-    ) {
-        self.cells
-            .iter()
-            .for_each(|cell| cell.draw(draw, text_layout, font, alt_font, now));
-    }
-}
+    pub fn draw(&self, draw: &Draw, font: &Font, alt_font: &Font, now: Instant, show_debug: bool) {
+        self.cells.iter().for_each(|cell| {
+            cell.draw(
+                draw,
+                &self.params.grid_text_layout,
+                &self.params.translation_text_layout,
+                font,
+                alt_font,
+                now,
+                show_debug,
+            )
+        });
 
-/*
-// Draw a single character entity
-pub fn draw_character(draw: &Draw, entity: &GridCellChar, font: &Font, time: f32) {
-    if entity.is_visible {
-        // Default values if not animating
-        let mut size_factor = 1.0;
-        let mut color_brightness = 1.0;
-
-        // Calculate animation effects if character is animating
-        if entity.is_animating {
-            if let Some(start_time) = entity.animation_start {
-                let elapsed = time - start_time;
-                let progress = (elapsed / entity.animation_duration).min(1.0);
-
-                // Size animation: quick attack (30%), longer decay (70%)
-                // Parameters: progress, attack_ratio, exp_attack, exp_decay, amplitude
-                size_factor = animation_curve(
-                    progress, 0.5, // Peak at _% of animation duration
-                    0.5, // Quicker initial attack (exp < 1.0 = faster start)
-                    0.5, // Slower tail decay (exp > 1.0 = longer tail)
-                    0.5, // % size increase at peak
-                );
-
-                // Brightness animation: exponential fade out
-                // Could use animation_curve here too, but a simple exponential decay works well
-                color_brightness = 1.0 + 0.1 * (1.0 - progress).powf(3.0);
-            }
+        if show_debug {
+            draw.ellipse().xy(self.params.origin).radius(5.0).color(RED);
+            draw.rect()
+                .xy(self.params.origin)
+                .wh(self.params.rect().wh())
+                .no_fill()
+                .stroke(RED)
+                .stroke_weight(5.0);
         }
-
-        // Apply animation factors to size and color
-        let display_size = (entity.font_size as f32 * size_factor) as u32;
-
-        // Brighten the color for the animation
-        let base_color = entity.color;
-        let display_color = rgba(
-            (base_color.red * color_brightness).min(1.0),
-            (base_color.green * color_brightness).min(1.0),
-            (base_color.blue * color_brightness).min(1.0),
-            base_color.alpha,
-        );
-
-        draw.text(&entity.display_char.to_string())
-            .font(font.clone())
-            .x_y(entity.position.x, entity.position.y)
-            .color(display_color)
-            .font_size(display_size);
     }
-
 }
-    */
 
 // Create character entities from a message string. Hides characters by default
 // so that animations can reveal them.

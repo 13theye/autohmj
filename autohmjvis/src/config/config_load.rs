@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub frame_recorder: FrameRecorderConfig,
     pub grid: GridConfig,
     pub audience_window: AudienceWindowConfig,
     pub performer_window: PerformerWindowConfig,
