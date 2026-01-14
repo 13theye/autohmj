@@ -5,11 +5,10 @@
 //!
 
 use crate::{
-    config::OscSendConfig,
     content::ContentEvent,
     events::HMJEventBus,
     models::ConvoItem,
-    services::{ConvoEvent, Sequencer, TranslationEvent},
+    services::{ConvoEvent, TranslationEvent},
 };
 
 use tokio::sync::broadcast;
@@ -27,14 +26,11 @@ pub struct ContentManager {
     connections: Arc<RwLock<HashMap<String, String>>>, // reference to model.connections
 
     // event tx
-    pub content_tx: broadcast::Sender<ContentEvent>,
+    content_tx: broadcast::Sender<ContentEvent>,
 
     // event rx
     convo_rx: broadcast::Receiver<ConvoEvent>,
     translation_rx: broadcast::Receiver<TranslationEvent>,
-
-    // OSC Sequencer
-    pub sequencer: Sequencer,
 }
 
 impl ContentManager {
@@ -42,17 +38,11 @@ impl ContentManager {
         id: &str,
         event_bus: &HMJEventBus,
         connections: Arc<RwLock<HashMap<String, String>>>,
-        osc_config: &OscSendConfig,
     ) -> Self {
-        // Initialize OSC Sender
-        let sequencer = Sequencer::new(id, osc_config);
-
         // Subscribe to events
         let convo_rx = event_bus.convo.subscribe();
         let translation_rx = event_bus.translation.subscribe();
-
-        // Initialize a content channel
-        let (content_tx, _) = broadcast::channel(16);
+        let content_tx = event_bus.content.clone();
 
         Self {
             id: id.to_owned(),
@@ -61,7 +51,6 @@ impl ContentManager {
             convo_rx,
             translation_rx,
             content_tx,
-            sequencer,
         }
     }
 
@@ -79,29 +68,39 @@ impl ContentManager {
             poisoned.into_inner()
         });
 
-        let Some(human_msg) = connections_read.get(&self.id) else {
+        let Some(live_msg) = connections_read.get(&self.id) else {
             return;
         };
 
-        let human_msg = human_msg.clone();
+        let live_msg = live_msg.clone();
 
         // Drop the lock
         drop(connections_read);
 
         // Don't do anything if there's no input and there's a previous message displayed.
-        if human_msg.is_empty() && self.latest.is_some() {
+        // This means live input is fresh ( no new live input since human last hit Enter)
+        // This ensures that the previous latest message is not immediately overwritten.
+        if live_msg.is_empty() && self.latest.is_some() {
             return;
         }
 
-        // Clear the latest message if the the live input is filling
-        if !human_msg.is_empty() && self.latest.is_some() {
+        // If there's no live input and latest is already empty, then we know that
+        // we can clear the latest message because the user as reached this state by clearing
+        // the live input.
+        if live_msg.is_empty() && self.latest.is_none() {
+            self.update_latest(None);
+            return;
+        }
+
+        // Clear the latest message when the the live input is beginning to fill.
+        if !live_msg.is_empty() && self.latest.is_some() {
             self.update_latest(None);
         }
 
         // Emit the live input event
         let _ = self.content_tx.send(ContentEvent::UpdatedLiveInput(
             self.id.to_owned(),
-            human_msg.to_owned(),
+            live_msg.to_owned(),
         ));
     }
 
@@ -155,8 +154,9 @@ impl ContentManager {
     /// Update the latest message buffer and send corresponding event
     fn update_latest(&mut self, latest: Option<KeyedConvoItem>) {
         self.latest = latest;
-        let _ = self
-            .content_tx
-            .send(ContentEvent::UpdatedLatest(self.latest.to_owned()));
+        let _ = self.content_tx.send(ContentEvent::UpdatedLatest(
+            self.id.to_owned(),
+            self.latest.to_owned(),
+        ));
     }
 }

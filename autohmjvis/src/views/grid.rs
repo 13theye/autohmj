@@ -154,20 +154,16 @@ impl TextGrid {
         let text_style = TextGridStyle::init();
 
         // Init GridCells
-        let cells = (0..grid_config.grid_rows)
-            .flat_map(|r| (0..grid_config.grid_cols).map(move |c| (c, r)))
-            .map(|(c, r)| GridCell::init((c, r), &params))
+        let cells = (0..grid_config.grid_cols)
+            .flat_map(|c| (0..grid_config.grid_rows).map(move |r| (r, c)))
+            .map(|(r, c)| GridCell::init((r, c), &params))
             .collect::<Vec<GridCell>>();
 
         // Animation
         let animation = AnimationController::new(1.0, 0.5);
 
         // Subscribe to events
-        let content_event_rx = event_bus
-            .content
-            .get(id)
-            .map(|tx| tx.subscribe())
-            .expect("TextGrid::init() -Failed to subscribe to content events");
+        let content_event_rx = event_bus.content.subscribe();
         let beat_rx = clock
             .subscribe_to_beats()
             .expect("TextGrid::init() -Failed to subscribe to beats");
@@ -203,25 +199,22 @@ impl TextGrid {
     fn process_events(&mut self, now: Instant) {
         while let Ok(event) = self.content_event_rx.try_recv() {
             match event {
-                ContentEvent::UpdatedLatest(latest) => {
+                ContentEvent::UpdatedLatest(id, latest) if id == self.id => {
                     self.latest_convo_item = latest;
-
-                    // exit early if latest is none
-                    if self.latest_convo_item.is_none() {
-                        return;
-                    }
 
                     self.update_content_chars();
 
+                    // Register typing animation if AI grid
                     if !self.is_human {
                         if let Some(latest) = &self.latest_convo_item {
                             self.register_animation(latest.0, now);
                         }
                     }
                 }
-                ContentEvent::UpdatedLiveInput(_, message) => {
+                ContentEvent::UpdatedLiveInput(id, message) if id == self.id => {
                     self.update_with_live_message(&message);
                 }
+                _ => {} // Ignore events for other grids
             }
         }
 
@@ -280,10 +273,6 @@ impl TextGrid {
         // Don't do anything if there's no input and a message is already in the grid
         if message.is_empty() && !self.content_chars.is_empty() {
             return;
-        }
-
-        if !message.is_empty() && !self.content_chars.is_empty() {
-            self.content_chars.clear();
         }
 
         // Uncomment this if eliminating whitespace
@@ -406,10 +395,12 @@ impl TextGrid {
 
     /// New message only removed characters from the end
     fn message_removed_chars(&self, new_chars: &[GridCellChar]) -> bool {
-        new_chars.len() < self.content_chars.len()
-            && new_chars
+        let old = &self.content_chars;
+
+        new_chars.len() < old.len()
+            && old[..new_chars.len()]
                 .iter()
-                .zip(&self.content_chars)
+                .zip(new_chars)
                 .all(|(a, b)| a.c == b.c)
     }
 
@@ -428,10 +419,24 @@ impl TextGrid {
 
     /// Propagate the content_chars to the cells
     pub fn fill_cells(&mut self) {
-        self.content_chars
-            .iter()
-            .zip(&mut self.cells)
-            .for_each(|(character, cell)| cell.content = Some(*character));
+        self.cells
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, cell)| match self.content_chars.get(i) {
+                Some(character) => {
+                    if character.is_visible {
+                        cell.background.white()
+                    } else {
+                        cell.background.blank()
+                    }
+                    cell.content = Some(*character);
+                }
+
+                None => {
+                    cell.background.blank();
+                    cell.content = None;
+                }
+            });
     }
 
     pub fn draw(
@@ -511,7 +516,7 @@ fn grid_cell_chars_from(message: &str, color: Rgba) -> Vec<GridCellChar> {
             c: ch,
             display: ch,
             color,
-            is_visible: false,
+            is_visible: true,
             is_hangeul,
             animation_state: GridCellCharAnimationState::default(),
         });

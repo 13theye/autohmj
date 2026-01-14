@@ -93,12 +93,12 @@ pub struct GridCell {
 impl GridCell {
     /// Initiate and derive params from place in the grid.
     /// `y_x` is a tuple of (row, column), with top-right origin
-    pub fn init(y_x: (u32, u32), grid_params: &TextGridParams) -> Self {
+    pub fn init(row_col: (u32, u32), grid_params: &TextGridParams) -> Self {
         let size = vec2(grid_params.cell_width, grid_params.cell_height);
 
         let origin = vec2(
-            grid_params.rect().top_right().x - (y_x.1 as f32 * size.x) + (size.y / 2.0),
-            grid_params.rect().top_right().y - (y_x.0 as f32 * size.y) + (size.y / 2.0),
+            grid_params.rect().top_right().x - (row_col.1 as f32 * size.x) + (size.x / 2.0),
+            grid_params.rect().top_right().y - (row_col.0 as f32 * size.y) + (size.y / 2.0),
         );
 
         Self {
@@ -109,6 +109,25 @@ impl GridCell {
     }
 
     pub fn draw(
+        &self,
+        draw: &Draw,
+        text_layout: &Layout,
+        font: &Font,
+        alt_font: &Font,
+        now: Instant,
+    ) {
+        self.draw_background(draw);
+        self.draw_char(draw, text_layout, font, alt_font, now);
+    }
+
+    pub fn draw_background(&self, draw: &Draw) {
+        draw.rect()
+            .xy(self.params.origin)
+            .wh(self.params.size)
+            .color(self.background.color);
+    }
+
+    pub fn draw_char(
         &self,
         draw: &Draw,
         text_layout: &Layout,

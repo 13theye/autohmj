@@ -50,7 +50,7 @@ fn model(app: &App) -> Model {
         .expect("AutoHMJVis: fatal error: Failed to start clock");
 
     // Initialize event bus
-    let mut events = HMJEventBus::default();
+    let events = HMJEventBus::default();
 
     // Subscribe to Gemma events
     let gemma_rx = events.gemma.subscribe();
@@ -71,14 +71,14 @@ fn model(app: &App) -> Model {
     // Assumes "assets/gulim.ttf" exists relative to the executable
     // or relative to the project root if running with `cargo run`
     let assets = app.assets_path().expect("Could not find assets directory");
-    let font_path = assets.join("gulim.ttf");
+    let font_path = assets.join("Lettera-Bold.ttf");
     let font_bytes = fs::read(&font_path)
         .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
     let korean_font = Font::from_bytes(font_bytes)
         .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
 
     // --- Load Font for Nannou Draw (Latin) ---
-    let font_path = assets.join("gulim.ttf");
+    let font_path = assets.join("batang.ttf");
     let font_bytes = fs::read(&font_path)
         .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
     let latin_font = Font::from_bytes(font_bytes)
@@ -183,17 +183,13 @@ fn model(app: &App) -> Model {
     let text_layout_builder = nannou::text::layout::Builder::default();
     let text_layout = text_layout_builder
         .line_spacing(15.0)
+        .font_size(40)
         .wrap_by_word()
-        .left_justify()
+        .center_justify()
         .build();
 
     // Initialize three ContentManagers specific to this performance
-    let content = init_three_content_managers(
-        &mut events,
-        connections.clone(),
-        &config.osc_send,
-        &gemma_config,
-    );
+    let content = init_three_content_managers(&events, connections.clone(), &gemma_config);
 
     // Initialize three text grids specific to this performance
     let grids = init_three_grids(
@@ -286,6 +282,11 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
     // Update ContentManagers
     model.content.iter_mut().for_each(|content| {
         content.update();
+    });
+
+    // Update Grid View modules
+    model.grids.iter_mut().for_each(|grid| {
+        grid.update(std::time::Instant::now());
     })
 }
 
@@ -355,9 +356,14 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
 
         rendering.encode_draw_commands(device, &mut encoder);
 
+        /*
         if let Err(e) = rendering.execute_named_pipeline("effects", device, &mut encoder) {
             eprintln!("Error executing effects pipeline: {}", e);
         }
+         */
+
+        // Skip effects pipeline and use passthrough
+        rendering.encode_passthrough_to_view(&mut encoder, rendering.output_view());
 
         rendering.submit_command_encoder(device, queue, encoder);
 
@@ -388,31 +394,17 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
 
 /// Initialize three ContentManagers specific to this performance
 fn init_three_content_managers(
-    event_bus: &mut HMJEventBus,
+    event_bus: &HMJEventBus,
     connections: Arc<RwLock<HashMap<String, String>>>,
-    osc_config: &OscSendConfig,
     gemma_config: &GemmaConfig,
 ) -> Vec<ContentManager> {
-    let human_content = ContentManager::new("Human", event_bus, connections.clone(), osc_config);
+    let human_content = ContentManager::new("Human", event_bus, connections.clone());
 
-    let gemma1_content = ContentManager::new(
-        &gemma_config.persona_1.id,
-        event_bus,
-        connections.clone(),
-        osc_config,
-    );
+    let gemma1_content =
+        ContentManager::new(&gemma_config.persona_1.id, event_bus, connections.clone());
 
-    let gemma2_content = ContentManager::new(
-        &gemma_config.persona_2.id,
-        event_bus,
-        connections.clone(),
-        osc_config,
-    );
-
-    // Register content channels
-    event_bus.register_content_manager(&human_content.id, &human_content.content_tx);
-    event_bus.register_content_manager(&gemma1_content.id, &gemma1_content.content_tx);
-    event_bus.register_content_manager(&gemma2_content.id, &gemma2_content.content_tx);
+    let gemma2_content =
+        ContentManager::new(&gemma_config.persona_2.id, event_bus, connections.clone());
 
     vec![human_content, gemma1_content, gemma2_content]
 }

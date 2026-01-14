@@ -11,6 +11,13 @@ target_port = 45602
 [tempo]
 bpm = 236
 
+[rendering_main]
+texture_width = 3840
+texture_height = 2160
+# Please don't change these
+texture_samples = 1
+arc_resolution = 25
+
 [audience_window]
 # The size of the monitoring window.
 # Currently scaling to 1/2 of texture resolution
@@ -30,17 +37,17 @@ grid_rows = 11
 grid_cols = 8
 
 # margin between screen edges and grid
-top_margin = 60
-bottom_margin = 60
-left_margin = 48
-right_margin = 48
+top_margin = 120
+bottom_margin = 120
+left_margin = 96
+right_margin = 96
 # spacing between grids
-grid_spacing = 45
+grid_spacing = 90
 # cell size
-cell_width = 70
-cell_height = 85
+cell_width = 140
+cell_height = 170
 # grid lines
-grid_line_stroke = 2
+grid_line_stroke = 4
 
 [paths]
 #paths are relative to executable directory
@@ -52,13 +59,6 @@ auth = "auth"
 gemma = "gemma"
 # path to intro image:
 intro_image = "intro.png"
-
-[rendering_main]
-texture_width = 3840
-texture_height = 2160
-# Please don't change these
-texture_samples = 1
-arc_resolution = 25
 
 
 [frame_recorder]
