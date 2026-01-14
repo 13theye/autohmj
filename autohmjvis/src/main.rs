@@ -3,81 +3,29 @@
 // auto-hunminjeongak server and visualizer
 //
 
-use nannou::{prelude::*, text::*, wgpu::TextureReshaper};
+use nannou::{prelude::*, text::*};
 use nnpipe::*;
+use prat::ClockService;
 use std::{
     cell::RefCell,
     collections::HashMap,
     fs,
     sync::{Arc, RwLock},
 };
-use tokio::sync::broadcast;
 
 use autohmjvis::{
-    config::{AuthConfig, Config, GemmaConfig, GridConfig, OscSendConfig, SpeedConfig},
-    events::{EventBus, GemmaEvent},
+    config::{AuthConfig, Config, GemmaConfig, GridConfig, OscSendConfig},
+    content::ContentManager,
+    events::{GemmaEvent, HMJEventBus},
     fps::FpsManager,
     intro::IntroImage,
-    models::{CommandMessage, HMJMessageWrapper},
+    models::{CommandMessage, HMJMessageWrapper, HumansTurn, Model},
     server::HMJServer,
     services::{ConversationService, GemmaPersona, GemmaService, TranslationService},
-    views::{BackgroundManager, TextGrid},
+    views::{BackgroundManager, TextGrid, TextGridPosition},
 };
 
 //const HUMAN_ID: &str = "Human";
-
-struct Model {
-    #[allow(dead_code)]
-    background: BackgroundManager, // handles background color and potential for transitions
-    intro_image: IntroImage, // the intro image
-    text_layout: Layout,     // style and layout of text
-
-    // Services
-    convo: ConversationService,    // handles the conversation
-    translate: TranslationService, // handles translation
-    ai: GemmaService,              // handles the AI
-
-    // Conversation channel (for moderator)
-    gemma_rx: broadcast::Receiver<GemmaEvent>, // the channel for Gemma events
-    humans_turn: HumansTurn, // true if the moderator decides human should speak next
-
-    // Text Grids
-    grids: Vec<TextGrid>, // the onscreen text grids
-
-    // WebSockets for client
-    server: HMJServer,                                 // the WebSockets server
-    connections: Arc<RwLock<HashMap<String, String>>>, // a shared reference to live input and cursor position
-    cursor_positions: HashMap<String, usize>,          // the cursor position in the grid
-
-    // Fonts
-    korean_font: Font, // the font for Korean text
-    #[allow(dead_code)]
-    latin_font: Font, // the font for Latin text
-
-    // Nannou API and rendering pipeline
-    rendering: RefCell<Nnpipe>, // the rendering pipeline
-
-    // Draws
-    #[allow(dead_code)]
-    draw: nannou::Draw, // the main draw
-    audience_draw: nannou::Draw,  // the draw for the audience window
-    performer_draw: nannou::Draw, // the draw for the performer window
-
-    // Window's texture reshaper
-    audience_window_id: WindowId,
-    performer_window_id: WindowId,
-    audience_reshaper: TextureReshaper,
-    performer_reshaper: TextureReshaper,
-
-    // FPS
-    fps: FpsManager, // handles FPS calculations and display
-
-    // When true, displays more verbose messages in terminal
-    show_debug: bool,
-
-    // When true, displays FPS
-    show_fps: bool,
-}
 
 fn model(app: &App) -> Model {
     // Load configs
@@ -91,8 +39,18 @@ fn model(app: &App) -> Model {
     let gemma_config = GemmaConfig::load(&config.paths.gemma)
         .expect("\nAuto훈민정음: FAILED TO LOAD GEMMA.TOML\n");
 
+    // Init and start ClockService
+    let mut clock = ClockService::with().tempo(config.tempo.bpm as f64).build();
+    // Start the clock thread or quit if it fails
+    clock
+        .start_thread()
+        .expect("AutoHMJVis: fatal error: Failed to start clock thread");
+    clock
+        .start_clock()
+        .expect("AutoHMJVis: fatal error: Failed to start clock");
+
     // Initialize event bus
-    let events = EventBus::default();
+    let mut events = HMJEventBus::default();
 
     // Subscribe to Gemma events
     let gemma_rx = events.gemma.subscribe();
@@ -229,15 +187,21 @@ fn model(app: &App) -> Model {
         .left_justify()
         .build();
 
-    // Initialize three text grids specific to this performance
-    let grids = init_three_grids(
-        app,
-        &config.grid,
-        &gemma_config,
-        &events,
+    // Initialize three ContentManagers specific to this performance
+    let content = init_three_content_managers(
+        &mut events,
         connections.clone(),
         &config.osc_send,
-        &config.speed,
+        &gemma_config,
+    );
+
+    // Initialize three text grids specific to this performance
+    let grids = init_three_grids(
+        &config.grid,
+        &gemma_config,
+        &config.osc_send,
+        &clock,
+        &events,
     );
 
     // Set up FPS manager
@@ -260,10 +224,12 @@ fn model(app: &App) -> Model {
         convo,
         translate,
         ai,
+        clock,
 
         gemma_rx,
         humans_turn: HumansTurn::True,
 
+        content,
         grids,
 
         korean_font,
@@ -297,7 +263,7 @@ fn main() {
 }
 
 // The main update loop, runs at 60Hz per Nannou
-fn update(app: &App, model: &mut Model, _update: Update) {
+fn update(_app: &App, model: &mut Model, _update: Update) {
     // FPS update
     if model.show_fps {
         model.fps.update();
@@ -317,8 +283,10 @@ fn update(app: &App, model: &mut Model, _update: Update) {
     // Process any new conversation items
     model.convo.update();
 
-    // Update & draw graphics
-    update_grids(app, model);
+    // Update ContentManagers
+    model.content.iter_mut().for_each(|content| {
+        content.update();
+    })
 }
 
 // The view functions get a copy of the resized main texture, then draw UI/HUD elements over it.
@@ -352,7 +320,7 @@ fn performer_view(app: &App, model: &Model, frame: Frame) {
     }
 
     // Draw current cursor position
-    draw_hud(app, model);
+    //draw_hud(app, model);
 
     // Then draw UI over it
     let _ = model.performer_draw.to_frame(app, &frame);
@@ -373,6 +341,18 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
 
         // Clear textures
         rendering.encode_clear_all_textures(&mut encoder, wgpu::Color::BLACK);
+
+        // Draw cotent
+        model.grids.iter().for_each(|grid| {
+            grid.draw(
+                &rendering.draw,
+                &model.text_layout,
+                &model.korean_font,
+                &model.latin_font,
+                std::time::Instant::now(),
+            );
+        });
+
         rendering.encode_draw_commands(device, &mut encoder);
 
         if let Err(e) = rendering.execute_named_pipeline("effects", device, &mut encoder) {
@@ -406,82 +386,73 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
 
 // ****************************** View functions ***********************************
 
-// Update each text grid
-fn update_grids(app: &App, model: &mut Model) {
-    let rendering = model.rendering.borrow();
-    for grid in model.grids.iter_mut() {
-        grid.update(
-            app.time,
-            &rendering.draw,
-            &model.text_layout,
-            &model.korean_font,
-            //&model.latin_font,
-            &model.korean_font,
-            &model.translate.translation_type,
-        );
-    }
+/// Initialize three ContentManagers specific to this performance
+fn init_three_content_managers(
+    event_bus: &mut HMJEventBus,
+    connections: Arc<RwLock<HashMap<String, String>>>,
+    osc_config: &OscSendConfig,
+    gemma_config: &GemmaConfig,
+) -> Vec<ContentManager> {
+    let human_content = ContentManager::new("Human", event_bus, connections.clone(), osc_config);
+
+    let gemma1_content = ContentManager::new(
+        &gemma_config.persona_1.id,
+        event_bus,
+        connections.clone(),
+        osc_config,
+    );
+
+    let gemma2_content = ContentManager::new(
+        &gemma_config.persona_2.id,
+        event_bus,
+        connections.clone(),
+        osc_config,
+    );
+
+    // Register content channels
+    event_bus.register_content_manager(&human_content.id, &human_content.content_tx);
+    event_bus.register_content_manager(&gemma1_content.id, &gemma1_content.content_tx);
+    event_bus.register_content_manager(&gemma2_content.id, &gemma2_content.content_tx);
+
+    vec![human_content, gemma1_content, gemma2_content]
 }
 
 // Initialize three text grids specific to this performance
 fn init_three_grids(
-    app: &App,
     grid_config: &GridConfig,
     gemma_config: &GemmaConfig,
-    events: &EventBus,
-    connections: Arc<RwLock<HashMap<String, String>>>,
     osc_config: &OscSendConfig,
-    speed_config: &SpeedConfig,
+    clock: &ClockService,
+    event_bus: &HMJEventBus,
 ) -> Vec<TextGrid> {
-    // Get window size
-    let rect = app.main_window().rect();
-    let width = rect.w();
-    let height = rect.h();
-
-    let font_size = grid_config.font_size_text;
-    let cols = grid_config.cols;
-
-    let margin = grid_config.left_right_margin as f32;
-    let column_width = (font_size * 2 * cols as u32) as f32;
-
-    // Define three columns
-    let center_col = Rect::from_x_y_w_h(0.0, 0.0, column_width, height);
-    let left_col = Rect::from_x_y_w_h(-(column_width + margin), 0.0, column_width, height);
-    let right_col = Rect::from_x_y_w_h(column_width + margin, 0.0, column_width, height);
-
     let human_grid = TextGrid::new(
         "Human",
         true,
+        TextGridPosition::Center,
         grid_config,
-        (width, height),
-        &center_col,
-        events,
-        connections.clone(),
         osc_config,
-        speed_config,
+        clock,
+        event_bus,
     );
 
     let gemma1_grid = TextGrid::new(
         &gemma_config.persona_1.id,
         false,
+        TextGridPosition::Left,
         grid_config,
-        (width, height),
-        &left_col,
-        events,
-        connections.clone(),
         osc_config,
-        speed_config,
+        clock,
+        event_bus,
     );
 
     let gemma2_grid = TextGrid::new(
         &gemma_config.persona_2.id,
         false,
+        TextGridPosition::Right,
         grid_config,
-        (width, height),
-        &right_col,
-        events,
-        connections.clone(),
         osc_config,
-        speed_config,
+        clock,
+        event_bus,
     );
 
     vec![gemma1_grid, human_grid, gemma2_grid]
@@ -659,6 +630,7 @@ fn draw_debug(app: &App, model: &Model) {
 // Draws the performer view HUD.
 // A grid showing the squares the human grid to help with spacing, and an indicator for the human's turn.
 // Also the current cursor position.
+/*
 fn draw_hud(app: &App, model: &Model) {
     let Some(grid) = model.grids.iter().find(|grid| grid.id == "Human") else {
         println!("No human grid found");
@@ -759,6 +731,7 @@ fn draw_hud(app: &App, model: &Model) {
         .color(rgba(1.0, 1.0, 1.0, 1.0))
         .stroke_weight(2.0); // Made thicker for visibility
 }
+*/
 
 // ************************ Main window input  *************************************
 
@@ -816,23 +789,4 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
         }
         _ => {}
     }
-}
-
-// ************************ Graceful Shutdown  *************************************
-
-impl Drop for Model {
-    fn drop(&mut self) {
-        // Modules shut themselves down gracefully.
-
-        println!("\nShutting down AutoHMJVis...");
-    }
-}
-
-// This enum tracks whether it's the human's turn.
-// It's set to Error if the API returns a blank response.
-#[derive(PartialEq, Eq, Debug, Clone, Copy)]
-enum HumansTurn {
-    True,
-    False,
-    Error,
 }

@@ -9,7 +9,7 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::{
     config::GemmaConfig,
-    events::EventBus,
+    events::HMJEventBus,
     models::{Conversation, ConvoItem},
 };
 
@@ -44,7 +44,7 @@ pub struct GemmaService {
 }
 
 impl GemmaService {
-    pub fn new(config: &GemmaConfig, api_key: &str, events: &EventBus) -> Self {
+    pub fn new(config: &GemmaConfig, api_key: &str, events: &HMJEventBus) -> Self {
         let system_prompt = config.system.prompt.to_owned();
         let runtime =
             tokio::runtime::Runtime::new().expect("Failed to start Tokio runtime for GemmaManager");
@@ -282,6 +282,7 @@ async fn generate_response(
     api_key: String,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
     // Build URL
+
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/{model}:generateContent?key={key}",
         model = model,

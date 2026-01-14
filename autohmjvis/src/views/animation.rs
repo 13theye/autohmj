@@ -1,10 +1,11 @@
-// src/services/animation.rs
-//
-// Handle text typing animation
+//! src/services/animation.rs
+//!
+//! Applies the text typing animation
 use nannou::rand::{thread_rng, Rng};
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
-use crate::views::{anim_hangeul::HangeulAnimator, grid::CharacterEntity};
+use crate::views::{anim_hangeul::HangeulAnimator, GridCellChar};
 
 // Track animation state for each message
 pub struct AnimationController {
@@ -21,7 +22,7 @@ struct MessageAnimation {
     complete: bool,
     char_progress: Vec<f32>, // track animation progress for each char (0.0-1.0)
     char_speed_factors: Vec<f32>, // speed variations at the char level
-    char_start_times: Vec<Option<f32>>, // start time of character reveal; None if not revealed
+    char_start_times: Vec<Option<Instant>>, // start time of character reveal; None if not revealed
 }
 
 // Event interface
@@ -42,20 +43,26 @@ impl AnimationController {
     }
 
     // Tick and apply a particular animation, then remove it if finished
-    pub fn update(&mut self, time: f32, message_key: usize, entities: &mut [CharacterEntity]) {
-        self.tick(time, message_key);
-        self.apply(message_key, entities);
+    pub fn update(
+        &mut self,
+        message_key: usize,
+        grid_cell_chars: &mut [GridCellChar],
+        now: Instant,
+    ) {
+        self.tick(now, message_key);
+        self.apply(message_key, grid_cell_chars);
     }
 
     // Register a new message for animation
     pub fn register(
         &mut self,
         message_id: usize,
-        text_vec: &[CharacterEntity],
-        char_count: usize,
-        start_time: f32,
+        characters: &[GridCellChar],
+        start_time: Instant,
     ) {
-        self.hangeul_animator.analyze(text_vec);
+        let char_count = characters.len();
+
+        self.hangeul_animator.analyze(characters);
         let char_progress = vec![0.0; char_count];
 
         // Generate random timing variations for each character
@@ -90,7 +97,7 @@ impl AnimationController {
         );
     }
 
-    fn tick(&mut self, time: f32, message_key: usize) {
+    fn tick(&mut self, now: Instant, message_key: usize) {
         if let Some(animation) = self.animations.get_mut(&message_key) {
             if !animation.complete {
                 let next_reveal_index = animation.revealed_chars;
@@ -101,15 +108,16 @@ impl AnimationController {
 
                     if let Some(char_start_time) = animation.char_start_times[i] {
                         // Calculate how long this char has been visible
-                        let char_elapsed = time - char_start_time;
+                        let char_elapsed = now - char_start_time;
 
-                        if char_elapsed > 0.0 {
+                        if char_elapsed.as_secs_f32() > 0.0 {
                             // Get this character's speed factor
                             let char_factor = animation.char_speed_factors.get(i).unwrap_or(&1.0);
 
                             // Update progress
-                            animation.char_progress[i] =
-                                (char_elapsed / (self.reveal_speed / 4.0 * char_factor)).min(1.0);
+                            animation.char_progress[i] = (char_elapsed.as_secs_f32()
+                                / (self.reveal_speed / 4.0 * char_factor))
+                                .min(1.0);
                         }
 
                         // Check if this character is complete and should trigger the next one
@@ -118,8 +126,8 @@ impl AnimationController {
                             && next_reveal_index < animation.total_chars
                         {
                             let mut rng = thread_rng();
-                            let delay = 0.03 * rng.gen_range(0.85..5.0); //  delay(s) between characters
-                            animation.char_start_times[next_reveal_index] = Some(time + delay);
+                            let delay = Duration::from_secs_f32(0.03 * rng.gen_range(0.85..5.0)); //  delay(s) between characters
+                            animation.char_start_times[next_reveal_index] = Some(now + delay);
                             animation.revealed_chars += 1;
                         }
                     }
@@ -134,20 +142,19 @@ impl AnimationController {
         }
     }
 
-    fn apply(&mut self, message_key: usize, entities: &mut [CharacterEntity]) {
+    fn apply(&mut self, message_key: usize, grid_cell_chars: &mut [GridCellChar]) {
         let cleanup = match self.animations.get(&message_key) {
             Some(animation) => {
-                for (idx, entity) in entities.iter_mut().enumerate() {
-                    entity.is_visible = idx < animation.revealed_chars;
+                for (idx, character) in grid_cell_chars.iter_mut().enumerate() {
+                    character.is_visible = idx < animation.revealed_chars;
 
                     // If visible and a Hangul character, update the display character based on progress
-                    if entity.is_visible && entity.is_hangeul {
+                    if character.is_visible && character.is_hangeul {
                         if let Some(&progress) = animation.char_progress.get(idx) {
-                            entity.display_char = if progress < 1.0 {
-                                self.hangeul_animator
-                                    .get_char_state(entity.character, progress)
+                            character.display = if progress < 1.0 {
+                                self.hangeul_animator.get_char_state(character.c, progress)
                             } else {
-                                entity.character
+                                character.c
                             };
                         }
                     }
@@ -156,9 +163,9 @@ impl AnimationController {
                 animation.complete // flag complete animation for cleanup
             }
             None => {
-                for entity in entities.iter_mut() {
-                    entity.is_visible = true;
-                    entity.display_char = entity.character;
+                for character in grid_cell_chars.iter_mut() {
+                    character.is_visible = true;
+                    character.display = character.c;
                 }
                 false // no animation to clean up
             }
@@ -168,4 +175,28 @@ impl AnimationController {
             self.animations.remove(&message_key);
         }
     }
+}
+
+// Animation curve function for flexible pulse effects
+pub fn animation_curve(
+    progress: f32,
+    attack_ratio: f32,
+    exp_attack: f32,
+    exp_decay: f32,
+    amplitude: f32,
+) -> f32 {
+    let peak_point = attack_ratio;
+
+    let pulse_value = if progress < peak_point {
+        // Attack phase - rise to peak
+        let attack_progress = progress / peak_point;
+        attack_progress.powf(exp_attack) // Lower values = faster initial attack
+    } else {
+        // Decay phase - fall from peak
+        let decay_progress = (progress - peak_point) / (1.0 - peak_point);
+        (1.0 - decay_progress).powf(exp_decay) // Higher values = longer tail
+    };
+
+    // Scale and offset (base = 1.0, add amplitude * pulse_value)
+    1.0 + amplitude * pulse_value
 }

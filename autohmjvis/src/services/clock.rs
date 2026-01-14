@@ -1,8 +1,8 @@
-// src/services/clock.rs
-//
-// very basic software ticker for testing
-// perfect accuracy is not guaranteed
-// for better accuracy, use Ableton Link
+//! src/services/clock.rs
+//!
+//! very basic software ticker for testing
+//! perfect accuracy is not guaranteed
+//! for better accuracy, use Ableton Link
 
 use std::time::{Duration, Instant};
 

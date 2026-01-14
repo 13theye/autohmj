@@ -2,9 +2,9 @@
 //
 // Hangeul animation functionality
 
-use std::collections::HashMap;
+use crate::views::GridCellChar;
 
-use crate::views::grid::CharacterEntity;
+use std::collections::HashMap;
 
 // The state of a Hangeul character being typed
 #[derive(Debug, Clone)]
@@ -25,9 +25,9 @@ pub struct HangeulAnimator {
 }
 
 impl HangeulAnimator {
-    pub fn analyze(&mut self, text_vec: &[CharacterEntity]) {
-        for ch in text_vec {
-            let c = ch.character;
+    pub fn analyze(&mut self, char_vec: &[GridCellChar]) {
+        for ch in char_vec {
+            let c = ch.c;
             if !self.jamo_states.contains_key(&c) && is_hangeul_char(c) {
                 self.jamo_states.insert(c, self.create_states(c));
             }

@@ -1,5 +1,6 @@
 // src/lib.rs
 pub mod config;
+pub mod content;
 pub mod effects;
 pub mod events;
 pub mod fps;

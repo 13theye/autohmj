@@ -20,7 +20,7 @@ pub struct Config {
     pub paths: PathConfig,
     pub rendering_main: RenderMainConfig,
     pub server: ServerConfig,
-    pub speed: SpeedConfig,
+    pub tempo: TempoConfig,
     pub translation: TranslationConfig,
 }
 

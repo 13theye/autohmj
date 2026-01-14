@@ -2,7 +2,7 @@
 //
 // Interface for the ConversationManager data model
 
-use crate::events::{EventBus, GemmaEvent, ServerEvent, TranslationEvent};
+use crate::events::{HMJEventBus, GemmaEvent, ServerEvent, TranslationEvent};
 use crate::models::{Conversation, ConversationManager, ConvoItem};
 
 use tokio::sync::broadcast;
@@ -33,7 +33,7 @@ pub struct ConversationService {
 }
 
 impl ConversationService {
-    pub fn new(events: &EventBus) -> Self {
+    pub fn new(events: &HMJEventBus) -> Self {
         // Set up eventbus send
         let translation_rx = events.translation.subscribe();
 

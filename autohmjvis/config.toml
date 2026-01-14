@@ -8,7 +8,7 @@ target_addr = "127.0.0.1"
 # OSC receiver's port.
 target_port = 45602
 
-[speed]
+[tempo]
 bpm = 236
 
 [audience_window]
@@ -25,13 +25,22 @@ height = 810
 [grid]
 font_size_text = 60
 font_size_translation = 40
-rows = 8
-cols = 8
-# margin between top of window and beginning of text grid: (Int)
-top_margin = 200
-# margin between end of text grid and translation: (Int)
-bottom_margin = 100
-left_right_margin = 350
+
+grid_rows = 11
+grid_cols = 8
+
+# margin between screen edges and grid
+top_margin = 60
+bottom_margin = 60
+left_margin = 48
+right_margin = 48
+# spacing between grids
+grid_spacing = 45
+# cell size
+cell_width = 70
+cell_height = 85
+# grid lines
+grid_line_stroke = 2
 
 [paths]
 #paths are relative to executable directory

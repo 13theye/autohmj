@@ -5,7 +5,7 @@
 // Needs tokio runtime because main app is sync
 
 use crate::{
-    events::{ConvoEvent, EventBus},
+    events::{ConvoEvent, HMJEventBus},
     models::HMJMessageWrapper,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -56,7 +56,7 @@ pub struct HMJServer {
 }
 
 impl HMJServer {
-    pub fn new(port: u16, events: &EventBus) -> Self {
+    pub fn new(port: u16, events: &HMJEventBus) -> Self {
         // Create comms channels
         let (message_tx, message_rx) = mpsc::channel(16);
         let (broadcast_tx, _) = broadcast::channel(16);

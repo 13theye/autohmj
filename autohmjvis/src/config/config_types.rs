@@ -19,11 +19,16 @@ pub struct GoogleConfig {
 pub struct GridConfig {
     pub font_size_text: u32,
     pub font_size_translation: u32,
-    pub rows: usize,
-    pub cols: usize,
+    pub grid_rows: u32,
+    pub grid_cols: u32,
     pub top_margin: u32,
     pub bottom_margin: u32,
-    pub left_right_margin: u32,
+    pub left_margin: u32,
+    pub right_margin: u32,
+    pub grid_spacing: u32,
+    pub cell_width: u32,
+    pub cell_height: u32,
+    pub grid_line_stroke: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,7 +78,7 @@ pub struct ServerConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct SpeedConfig {
+pub struct TempoConfig {
     pub bpm: u32,
 }
 

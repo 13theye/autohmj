@@ -1,6 +1,3 @@
-pub mod clock;
-pub use clock::ClockService;
-
 pub mod convo;
 pub use convo::{ConversationService, ConvoEvent};
 

@@ -7,7 +7,7 @@ use deeplx::{Config, DeepLX};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::events::{ConvoEvent, EventBus};
+use crate::events::{ConvoEvent, HMJEventBus};
 
 // Event interface
 #[derive(Clone, Debug)]
@@ -36,7 +36,7 @@ pub struct TranslationService {
 }
 
 impl TranslationService {
-    pub fn new(events: &EventBus, enabled: bool) -> Self {
+    pub fn new(events: &HMJEventBus, enabled: bool) -> Self {
         // Set up eventbus send
         let event_tx = events.translation.clone();
 

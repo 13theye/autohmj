@@ -3,17 +3,17 @@
 //
 // Desconstruct and parse hangeul characters and send OSC messages
 
-use crate::{config::OscSendConfig, osc::OscSender, views::grid::CharacterEntity};
+use crate::{config::OscSendConfig, osc::OscSender, views::GridCellChar};
 use std::time::Instant;
 
 pub struct Sequencer {
-    id: String,               // id should be same as id of the grid that owns this sequencer
-    pub is_sending: bool,     // when false, no OSC messages are sent
-    beat_count: usize,        // the number of beats that have passed
-    last_clock_time: Instant, // the time of the last clock tick
-    pub current_idx: usize,   // this increments at the START OF BEAT, not after read.
-    characters: Vec<CharacterEntity>, // the characters to display
-    osc_sender: OscSender,    // the OSC sender to send messages to the grid
+    id: String,             // id should be same as id of the grid that owns this sequencer
+    pub is_sending: bool,   // when false, no OSC messages are sent
+    beat_count: usize,      // the number of beats that have passed
+    last_tick: Instant,     // the time of the last clock tick
+    pub current_idx: usize, // this increments at the START OF BEAT, not after read.
+    characters: Vec<GridCellChar>, // the characters to display
+    osc_sender: OscSender,  // the OSC sender to send messages to the grid
 }
 
 impl Sequencer {
@@ -23,7 +23,7 @@ impl Sequencer {
             id: id.to_owned(),
             is_sending: true,
             beat_count: 0,
-            last_clock_time: Instant::now(),
+            last_tick: Instant::now(),
             current_idx: 0,
             characters: Vec::new(),
             osc_sender,
@@ -33,7 +33,7 @@ impl Sequencer {
     // Updates the sequencer state,
     // Sends OSC out,
     // Returns the index of the current character
-    pub fn update(&mut self, chars: &[CharacterEntity]) {
+    pub fn update(&mut self, chars: &[GridCellChar]) {
         self.characters = chars.to_vec();
 
         // track the time
@@ -59,7 +59,7 @@ impl Sequencer {
     fn increment(&mut self) {
         self.beat_count += 1;
         self.current_idx += 1;
-        self.last_clock_time = Instant::now();
+        self.last_tick = Instant::now();
     }
 
     // get the next visible character
@@ -77,8 +77,7 @@ impl Sequencer {
         }
 
         // return the character at the current index
-        let entity = visible_chars[self.current_idx];
-        Some(entity.character)
+        Some(visible_chars[self.current_idx].c)
     }
 
     // send the OSC messages
