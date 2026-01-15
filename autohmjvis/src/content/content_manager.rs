@@ -25,6 +25,9 @@ pub struct ContentManager {
     pub latest: Option<KeyedConvoItem>, // the latest (key, message)
     connections: Arc<RwLock<HashMap<String, String>>>, // reference to model.connections
 
+    // Track previous live input to avoid redundant events
+    previous_live_input: String,
+
     // event tx
     content_tx: broadcast::Sender<ContentEvent>,
 
@@ -48,6 +51,7 @@ impl ContentManager {
             id: id.to_owned(),
             latest: None,
             connections,
+            previous_live_input: String::new(),
             convo_rx,
             translation_rx,
             content_tx,
@@ -77,10 +81,16 @@ impl ContentManager {
         // Drop the lock
         drop(connections_read);
 
+        // Don't do anything if live input hasn't changed
+        if live_msg == self.previous_live_input {
+            return;
+        }
+
         // Don't do anything if there's no input and there's a previous message displayed.
         // This means live input is fresh ( no new live input since human last hit Enter)
         // This ensures that the previous latest message is not immediately overwritten.
         if live_msg.is_empty() && self.latest.is_some() {
+            self.previous_live_input = live_msg;
             return;
         }
 
@@ -89,6 +99,7 @@ impl ContentManager {
         // the live input.
         if live_msg.is_empty() && self.latest.is_none() {
             self.update_latest(None);
+            self.previous_live_input = live_msg;
             return;
         }
 
@@ -97,11 +108,14 @@ impl ContentManager {
             self.update_latest(None);
         }
 
-        // Emit the live input event
+        // Emit the live input event (only when changed)
         let _ = self.content_tx.send(ContentEvent::UpdatedLiveInput(
             self.id.to_owned(),
-            live_msg.to_owned(),
+            live_msg.clone(),
         ));
+
+        // Update previous state
+        self.previous_live_input = live_msg;
     }
 
     /// Listen for events from the ConversationManager.
@@ -136,7 +150,7 @@ impl ContentManager {
                     if key == *latest_key {
                         let mut new_entry = latest_entry.to_owned();
                         new_entry.translation = translation;
-                        self.update_latest(Some((*latest_key, new_entry)));
+                        self.update_translation(Some((*latest_key, new_entry)));
                     }
                 }
             }
@@ -147,6 +161,14 @@ impl ContentManager {
     fn update_latest(&mut self, latest: Option<KeyedConvoItem>) {
         self.latest = latest;
         let _ = self.content_tx.send(ContentEvent::UpdatedLatest(
+            self.id.to_owned(),
+            self.latest.to_owned(),
+        ));
+    }
+
+    fn update_translation(&mut self, latest: Option<KeyedConvoItem>) {
+        self.latest = latest;
+        let _ = self.content_tx.send(ContentEvent::UpdatedTranslation(
             self.id.to_owned(),
             self.latest.to_owned(),
         ));

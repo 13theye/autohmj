@@ -14,7 +14,6 @@ use std::{
 };
 
 use autohmjvis::{
-    config::{AuthConfig, Config, GemmaConfig, GridConfig, OscSendConfig},
     content::ContentManager,
     events::{GemmaEvent, HMJEventBus},
     fps::FpsManager,
@@ -22,6 +21,7 @@ use autohmjvis::{
     models::{CommandMessage, HMJMessageWrapper, HumansTurn, Model},
     server::HMJServer,
     services::{ConversationService, GemmaPersona, GemmaService, TranslationService},
+    settings::{AuthConfig, GemmaConfig, GridConfig, OscSendConfig, Settings},
     views::{BackgroundManager, TextGrid, TextGridPosition},
 };
 
@@ -30,10 +30,11 @@ use autohmjvis::{
 fn model(app: &App) -> Model {
     // Load configs
     // general config from the CONFIG.TOML file
-    let config = Config::load().expect("\nAuto훈민정음: FAILED TO LOAD CONFIG.TOML\n");
+    let config = Settings::load().expect("\nAuto훈민정음: FAILED TO LOAD CONFIG.TOML\n");
     // Gemma API key from the /auth/key.toml file
-    let auth_config =
-        AuthConfig::load(&config.paths.auth).expect("\nAuto훈민정음: FAILED TO LOAD KEY.TOML\n");
+    let auth_config = AuthConfig::load(&config.paths.auth).unwrap_or_else(|e| {
+        panic!("\nAuto훈민정음: FAILED TO LOAD KEY.TOML\nError: {:?}\n", e)
+    });
 
     // Gemma config from the /gemma/gemma.toml file
     let gemma_config = GemmaConfig::load(&config.paths.gemma)
@@ -71,14 +72,14 @@ fn model(app: &App) -> Model {
     // Assumes "assets/gulim.ttf" exists relative to the executable
     // or relative to the project root if running with `cargo run`
     let assets = app.assets_path().expect("Could not find assets directory");
-    let font_path = assets.join("Lettera-Bold.ttf");
+    let font_path = assets.join("AppleMyungjo.ttf");
     let font_bytes = fs::read(&font_path)
         .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
     let korean_font = Font::from_bytes(font_bytes)
         .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
 
     // --- Load Font for Nannou Draw (Latin) ---
-    let font_path = assets.join("batang.ttf");
+    let font_path = assets.join("Lettera-Bold.ttf");
     let font_bytes = fs::read(&font_path)
         .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
     let latin_font = Font::from_bytes(font_bytes)
@@ -237,6 +238,8 @@ fn model(app: &App) -> Model {
 
         rendering: RefCell::new(rendering),
 
+        update_time: std::time::Instant::now(),
+
         fps,
 
         show_fps: false,
@@ -250,6 +253,8 @@ fn main() {
 
 // The main update loop, runs at 60Hz per Nannou
 fn update(_app: &App, model: &mut Model, _update: Update) {
+    model.update_time = std::time::Instant::now();
+
     // FPS update
     if model.show_fps {
         model.fps.update();
@@ -276,7 +281,7 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
 
     // Update Grid View modules
     model.grids.iter_mut().for_each(|grid| {
-        grid.update(std::time::Instant::now());
+        grid.update(model.update_time);
     })
 }
 
@@ -339,7 +344,7 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
                 &rendering.draw,
                 &model.korean_font,
                 &model.latin_font,
-                std::time::Instant::now(),
+                model.update_time,
                 model.show_debug,
             );
         });

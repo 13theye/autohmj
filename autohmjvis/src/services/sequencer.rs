@@ -3,7 +3,7 @@
 //
 // Desconstruct and parse hangeul characters and send OSC messages
 
-use crate::{config::OscSendConfig, osc::OscSender, views::GridCellChar};
+use crate::{osc::OscSender, settings::OscSendConfig, views::GridCellChar};
 use std::time::Instant;
 
 pub struct Sequencer {

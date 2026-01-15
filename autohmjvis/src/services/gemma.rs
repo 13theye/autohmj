@@ -8,9 +8,9 @@ use std::{collections::HashMap, error::Error};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::{
-    config::GemmaConfig,
     events::HMJEventBus,
     models::{Conversation, ConvoItem},
+    settings::GemmaConfig,
 };
 
 // These events are emitted by GemmaService to notify subscribers of responses from the Gemma API.

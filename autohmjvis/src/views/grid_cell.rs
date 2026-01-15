@@ -120,8 +120,8 @@ impl GridCell {
         draw: &Draw,
         grid_text_layout: &Layout,
         _translation_text_layout: &Layout,
-        font: &Font,
-        alt_font: &Font,
+        font: Font,
+        alt_font: Font,
         now: Instant,
         show_debug: bool,
     ) {
@@ -147,8 +147,8 @@ impl GridCell {
         &self,
         draw: &Draw,
         layout: &Layout,
-        font: &Font,
-        alt_font: &Font,
+        font: Font,
+        alt_font: Font,
         now: Instant,
     ) {
         let Some(character) = self.content else {
@@ -156,6 +156,8 @@ impl GridCell {
         };
 
         if character.is_visible {
+            let font = if character.is_hangeul { font } else { alt_font };
+
             // Default values if not animating
             let mut size_factor = 1.0;
             let mut color_brightness = 1.0;
@@ -189,11 +191,7 @@ impl GridCell {
             );
 
             draw.text(&character.display.to_string())
-                .font(if character.is_hangeul {
-                    alt_font.clone()
-                } else {
-                    font.clone()
-                })
+                .font(font)
                 .x_y(self.params.origin.x, self.params.origin.y)
                 .color(display_color)
                 .font_size(display_size);

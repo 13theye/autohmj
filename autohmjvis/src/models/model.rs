@@ -19,6 +19,7 @@ use std::{
     cell::RefCell,
     collections::HashMap,
     sync::{Arc, RwLock},
+    time::Instant,
 };
 use tokio::sync::broadcast;
 
@@ -62,6 +63,9 @@ pub struct Model {
     pub performer_window_id: WindowId,
     pub audience_reshaper: TextureReshaper,
     pub performer_reshaper: TextureReshaper,
+
+    // Timing
+    pub update_time: Instant,
 
     // FPS
     pub fps: FpsManager, // handles FPS calculations and display

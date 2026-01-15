@@ -1,0 +1,126 @@
+// src/config/config_load.rs
+//
+// Loads config.toml
+//
+// Version 1.0-autofolk music
+// 15 Apr 2025
+
+use super::settings_types::*;
+use config::{Config, ConfigError, File};
+use serde::Deserialize;
+use std::env;
+
+#[derive(Debug, Deserialize)]
+pub struct Settings {
+    pub grid: GridConfig,
+    pub audience_window: AudienceWindowConfig,
+    pub performer_window: PerformerWindowConfig,
+    pub osc_send: OscSendConfig,
+    pub paths: PathConfig,
+    pub rendering_main: RenderMainConfig,
+    pub server: ServerConfig,
+    pub tempo: TempoConfig,
+    pub translation: TranslationConfig,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AuthConfig {
+    pub google: GoogleConfig,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GemmaConfig {
+    pub system: SystemPromptConfig,
+    pub persona_1: PersonaConfig,
+    pub persona_2: PersonaConfig,
+    pub moderator: PersonaConfig,
+}
+
+impl Settings {
+    /************************* Config file loading ********************/
+
+    pub fn load() -> Result<Self, ConfigError> {
+        // Get the executable's directory
+        let exe_path = env::current_exe()
+            .map_err(|e| ConfigError::Message(format!("Failed to get executable path: {}", e)))?;
+
+        let exe_dir = exe_path.parent().ok_or_else(|| {
+            ConfigError::Message("Failed to get executable directory".to_string())
+        })?;
+
+        // Build path to config file relative to executable
+        let config_path = exe_dir.join("autohmjvis-support").join("config");
+
+        let config_path_str = config_path
+            .to_str()
+            .ok_or_else(|| ConfigError::Message("Invalid config path".to_string()))?;
+
+        let s = Config::builder()
+            // Load configuration file from executable's directory
+            .add_source(File::with_name(config_path_str).required(true))
+            .build()?;
+
+        // You can deserialize (and thus freeze) the entire configuration as
+        s.try_deserialize()
+    }
+}
+
+impl AuthConfig {
+    pub fn load(folder_name: &str) -> Result<Self, ConfigError> {
+        // Get the executable's directory
+        let exe_path = env::current_exe()
+            .map_err(|e| ConfigError::Message(format!("Failed to get executable path: {}", e)))?;
+
+        let exe_dir = exe_path.parent().ok_or_else(|| {
+            ConfigError::Message("Failed to get executable directory".to_string())
+        })?;
+
+        // Build path to config file relative to executable
+        let key_path = exe_dir
+            .join("autohmjvis-support")
+            .join(folder_name)
+            .join("key");
+
+        let key_path_str = key_path
+            .to_str()
+            .ok_or_else(|| ConfigError::Message("Invalid config path".to_string()))?;
+
+        let s = Config::builder()
+            // Load configuration file from executable's directory
+            .add_source(File::with_name(key_path_str).required(true))
+            .build()?;
+
+        // You can deserialize (and thus freeze) the entire configuration as
+        s.try_deserialize()
+    }
+}
+
+impl GemmaConfig {
+    pub fn load(folder_name: &str) -> Result<Self, ConfigError> {
+        // Get the executable's directory
+        let exe_path = env::current_exe()
+            .map_err(|e| ConfigError::Message(format!("Failed to get executable path: {}", e)))?;
+
+        let exe_dir = exe_path.parent().ok_or_else(|| {
+            ConfigError::Message("Failed to get executable directory".to_string())
+        })?;
+
+        // Build path to config file relative to executable
+        let gemma_config_path = exe_dir
+            .join("autohmjvis-support")
+            .join(folder_name)
+            .join("gemma");
+
+        let gemma_config_path_str = gemma_config_path
+            .to_str()
+            .ok_or_else(|| ConfigError::Message("Invalid config path".to_string()))?;
+
+        let s = Config::builder()
+            // Load configuration file from executable's directory
+            .add_source(File::with_name(gemma_config_path_str).required(true))
+            .build()?;
+
+        // You can deserialize (and thus freeze) the entire configuration as
+        s.try_deserialize()
+    }
+}

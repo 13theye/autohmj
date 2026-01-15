@@ -5,15 +5,14 @@
 use nannou::prelude::*;
 use nannou::text::{Font, Layout};
 
-use crossbeam_channel as channel;
 use prat::clockservice::{BeatEvent, BeatSubdivision, ClockService};
 use tokio::sync::broadcast;
 
 use crate::{
-    config::{GridConfig, OscSendConfig},
     content::{ContentEvent, KeyedConvoItem},
     events::HMJEventBus,
     services::Sequencer,
+    settings::{GridConfig, OscSendConfig},
     views::{grid_cell::GridCellCharAnimationState, AnimationController, GridCell, GridCellChar},
 };
 
@@ -81,7 +80,7 @@ impl TextGridParams {
     }
 
     pub fn height(&self) -> f32 {
-        self.cell_height * self.rows as f32 + self.grid_line_stroke * (self.rows as f32 + 1.0)
+        self.cell_height * self.rows as f32 + self.grid_line_stroke * (self.rows as f32)
     }
 
     pub fn rect(&self) -> Rect {
@@ -147,14 +146,14 @@ pub struct TextGrid {
     pub cells: Vec<GridCell>,
 
     // animation
-    animation: AnimationController,
+    typing_animation: AnimationController,
 
     // Sequencer
     pub sequencer: Sequencer,
 
     // events
     content_event_rx: broadcast::Receiver<ContentEvent>,
-    beat_rx: channel::Receiver<BeatEvent>,
+    beat_rx: broadcast::Receiver<BeatEvent>,
 }
 
 impl TextGrid {
@@ -201,7 +200,7 @@ impl TextGrid {
             latest_convo_item: None,
             content_chars: Vec::new(),
             cells,
-            animation,
+            typing_animation: animation,
             sequencer,
             content_event_rx,
             beat_rx,
@@ -234,6 +233,10 @@ impl TextGrid {
                 ContentEvent::UpdatedLiveInput(id, message) if id == self.id => {
                     self.update_with_live_message(&message);
                 }
+                ContentEvent::UpdatedTranslation(id, latest) if id == self.id => {
+                    self.latest_convo_item = latest;
+                    self.update_content_chars();
+                }
                 _ => {} // Ignore events for other grids
             }
         }
@@ -262,7 +265,8 @@ impl TextGrid {
 
     /// Register a new animation
     fn register_animation(&mut self, key: usize, now: Instant) {
-        self.animation.register(key, &self.content_chars, now);
+        self.typing_animation
+            .register(key, &self.content_chars, now);
     }
 
     // If this word is being sent to the sequencer, trigger the animation
@@ -271,7 +275,25 @@ impl TextGrid {
             return;
         }
 
-        let character = &mut self.content_chars[self.sequencer.current_idx];
+        // Get indices of visible characters (matching sequencer's filtering logic)
+        let visible_indices: Vec<usize> = self
+            .content_chars
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.is_visible)
+            .map(|(i, _)| i)
+            .collect();
+
+        if visible_indices.is_empty() {
+            return;
+        }
+
+        // Ensure current_idx is within bounds and get the actual index in content_chars
+        let idx = self.sequencer.current_idx % visible_indices.len();
+        let actual_idx = visible_indices[idx];
+
+        // Animate the correct character
+        let character = &mut self.content_chars[actual_idx];
         character.animation_state.set_start(now);
         character
             .animation_state
@@ -281,11 +303,18 @@ impl TextGrid {
 
     /// Update the animation for the latest message
     fn update_animation(&mut self, now: Instant) {
+        self.content_chars.iter_mut().for_each(|c| {
+            if now - c.animation_state.start > c.animation_state.duration {
+                c.animation_state.set_active(false);
+            }
+        });
+
         let Some((key, _)) = self.latest_convo_item else {
             return;
         };
 
-        self.animation.update(key, &mut self.content_chars, now);
+        self.typing_animation
+            .update(key, &mut self.content_chars, now);
     }
 
     /// Update the grid with a live input message
@@ -465,8 +494,8 @@ impl TextGrid {
                 draw,
                 &self.params.grid_text_layout,
                 &self.params.translation_text_layout,
-                font,
-                alt_font,
+                font.clone(),
+                alt_font.clone(),
                 now,
                 show_debug,
             )
