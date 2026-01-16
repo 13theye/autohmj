@@ -39,6 +39,7 @@ impl GridCellBackground {
     }
 }
 
+/// A single character to be displayed in a grid cell and used by the Sequencer.
 #[derive(Copy, Clone, Debug)]
 pub struct GridCellChar {
     // The complete content character
@@ -49,17 +50,18 @@ pub struct GridCellChar {
     pub color: Rgba,
     pub is_visible: bool,
     pub is_hangeul: bool,
-    pub animation_state: GridCellCharAnimationState,
+    pub style_animation: GridCellCharStyleAnimationState,
 }
 
+/// The animation state of a character, used for the simple scaling/color animations
+/// triggered by the sequencer. Typing animations are managed by the TypingAnimationController.
 #[derive(Copy, Clone, Debug)]
-pub struct GridCellCharAnimationState {
+pub struct GridCellCharStyleAnimationState {
     pub start: Instant,
     pub duration: Duration,
-    pub is_active: bool,
 }
 
-impl GridCellCharAnimationState {
+impl GridCellCharStyleAnimationState {
     pub fn set_start(&mut self, start: Instant) {
         self.start = start;
     }
@@ -68,21 +70,21 @@ impl GridCellCharAnimationState {
         self.duration = duration;
     }
 
-    pub fn set_active(&mut self, is_active: bool) {
-        self.is_active = is_active;
+    pub fn is_active(&self, now: Instant) -> bool {
+        now - self.start < self.duration
     }
 }
 
-impl Default for GridCellCharAnimationState {
+impl Default for GridCellCharStyleAnimationState {
     fn default() -> Self {
         Self {
             start: Instant::now(),
             duration: Duration::ZERO,
-            is_active: false,
         }
     }
 }
 
+/// A single cell of the grid, responsible for drawing the character and background.
 #[derive(Copy, Clone, Debug)]
 pub struct GridCell {
     pub params: GridCellParams,
@@ -163,18 +165,18 @@ impl GridCell {
             let mut color_brightness = 1.0;
 
             // Calculate animation effects if character is animating
-            if character.animation_state.is_active {
-                let elapsed = now - character.animation_state.start;
+            if character.style_animation.is_active(now) {
+                let elapsed = now - character.style_animation.start;
                 let progress = (elapsed.as_secs_f32()
-                    / character.animation_state.duration.as_secs_f32())
+                    / character.style_animation.duration.as_secs_f32())
                 .min(1.0);
 
                 // Size animation: quick attack (30%), longer decay (70%)
                 // Parameters: progress, attack_ratio, exp_attack, exp_decay, amplitude
                 size_factor = animation::animation_curve(
                     progress, 0.5, // Peak at _% of animation duration
-                    0.5, // Quicker initial attack (exp < 1.0 = faster start)
-                    0.5, // Slower tail decay (exp > 1.0 = longer tail)
+                    0.3, // Quicker initial attack (exp < 1.0 = faster start)
+                    0.7, // Slower tail decay (exp > 1.0 = longer tail)
                     0.5, // % size increase at peak
                 );
 

@@ -6,13 +6,13 @@ pub use crate::{
     content::ContentEvent,
     server::ServerEvent,
     services::{ConvoEvent, GemmaEvent, TranslationEvent},
-    views::AnimationEvent,
+    views::TypingAnimationEvent,
 };
 use tokio::sync::broadcast;
 
 #[derive(Clone, Debug)]
 pub struct HMJEventBus {
-    pub animation: broadcast::Sender<AnimationEvent>,
+    pub animation: broadcast::Sender<TypingAnimationEvent>,
     pub convo: broadcast::Sender<ConvoEvent>,
     pub gemma: broadcast::Sender<GemmaEvent>,
     pub server: broadcast::Sender<ServerEvent>,

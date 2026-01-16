@@ -1,6 +1,6 @@
 // src/views/mod.rs
 pub mod animation;
-pub use animation::{AnimationController, AnimationEvent};
+pub use animation::{TypingAnimationController, TypingAnimationEvent};
 
 pub mod anim_hangeul;
 

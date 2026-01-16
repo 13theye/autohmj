@@ -8,15 +8,15 @@ use std::time::{Duration, Instant};
 use crate::views::{anim_hangeul::HangeulAnimator, GridCellChar};
 
 // Track animation state for each message
-pub struct AnimationController {
-    animations: HashMap<usize, MessageAnimation>, // <message_key, animation>
-    reveal_speed: f32,                            // Chars per second
-    variation: f32,                               // Speed variation
+pub struct TypingAnimationController {
+    animations: HashMap<usize, TypingAnimation>, // <message_key, animation>
+    reveal_speed: f32,                           // Chars per second
+    variation: f32,                              // Speed variation
 
     hangeul_animator: HangeulAnimator,
 }
 
-struct MessageAnimation {
+struct TypingAnimation {
     total_chars: usize,
     revealed_chars: usize,
     complete: bool,
@@ -27,11 +27,11 @@ struct MessageAnimation {
 
 // Event interface
 #[derive(Clone, Debug)]
-pub enum AnimationEvent {
+pub enum TypingAnimationEvent {
     ResponseReceived,
 }
 
-impl AnimationController {
+impl TypingAnimationController {
     pub fn new(reveal_speed: f32, variation: f32) -> Self {
         Self {
             animations: HashMap::new(),
@@ -86,7 +86,7 @@ impl AnimationController {
 
         self.animations.insert(
             message_id,
-            MessageAnimation {
+            TypingAnimation {
                 total_chars: char_count,
                 revealed_chars: 1,
                 complete: false,

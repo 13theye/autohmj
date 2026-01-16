@@ -13,7 +13,10 @@ use crate::{
     events::HMJEventBus,
     services::Sequencer,
     settings::{GridConfig, OscSendConfig},
-    views::{grid_cell::GridCellCharAnimationState, AnimationController, GridCell, GridCellChar},
+    views::{
+        grid_cell::GridCellCharStyleAnimationState, GridCell, GridCellChar,
+        TypingAnimationController,
+    },
 };
 
 use std::time::{Duration, Instant};
@@ -146,7 +149,7 @@ pub struct TextGrid {
     pub cells: Vec<GridCell>,
 
     // animation
-    typing_animation: AnimationController,
+    typing_animation: TypingAnimationController,
 
     // Sequencer
     pub sequencer: Sequencer,
@@ -179,7 +182,7 @@ impl TextGrid {
             .collect::<Vec<GridCell>>();
 
         // Animation
-        let animation = AnimationController::new(1.0, 0.5);
+        let animation = TypingAnimationController::new(1.0, 0.5);
 
         // Subscribe to events
         let content_event_rx = event_bus.content.subscribe();
@@ -207,11 +210,14 @@ impl TextGrid {
         }
     }
 
-    /// Update the grid state, sending events if necessary
     /// Run once every app cycle.
+    /// - Receive events from the ContentManager update the grid state.
+    /// - Receive BeatEvents and advance the Sequencer
+    /// - Update typing animation states
+    /// - Prep GridCells for drawing.
     pub fn update(&mut self, now: Instant) {
         self.process_events(now);
-        self.update_animation(now);
+        self.update_typing_animation(now);
         self.fill_cells();
     }
 
@@ -231,7 +237,7 @@ impl TextGrid {
                     }
                 }
                 ContentEvent::UpdatedLiveInput(id, message) if id == self.id => {
-                    self.update_with_live_message(&message);
+                    self.update_with_live_message(&message, now);
                 }
                 ContentEvent::UpdatedTranslation(id, latest) if id == self.id => {
                     self.latest_convo_item = latest;
@@ -294,22 +300,14 @@ impl TextGrid {
 
         // Animate the correct character
         let character = &mut self.content_chars[actual_idx];
-        character.animation_state.set_start(now);
+        character.style_animation.set_start(now);
         character
-            .animation_state
+            .style_animation
             .set_duration(CHARACTER_ANIMATION_DURATION);
-        character.animation_state.set_active(true);
     }
 
     /// Update the animation for the latest message
-    fn update_animation(&mut self, now: Instant) {
-        self.content_chars.iter_mut().for_each(|c| {
-            if now - c.animation_state.start > c.animation_state.duration {
-                c.animation_state.set_active(false);
-                c.display = c.c;
-            }
-        });
-
+    fn update_typing_animation(&mut self, now: Instant) {
         let Some((key, _)) = self.latest_convo_item else {
             return;
         };
@@ -319,7 +317,7 @@ impl TextGrid {
     }
 
     /// Update the grid with a live input message
-    fn update_with_live_message(&mut self, message: &str) {
+    fn update_with_live_message(&mut self, message: &str, now: Instant) {
         // Don't do anything if there's no input and a message is already in the grid
         if message.is_empty() && !self.content_chars.is_empty() {
             return;
@@ -346,7 +344,7 @@ impl TextGrid {
             new_chars.into_iter().enumerate().for_each(|(i, new_char)| {
                 // Copy all GridCellChars including their animation states
                 let mut c = new_char;
-                c.animation_state = self.content_chars[i].animation_state;
+                c.style_animation = self.content_chars[i].style_animation;
                 updated_chars.push(c);
             });
 
@@ -357,7 +355,7 @@ impl TextGrid {
                 if i < self.content_chars.len() {
                     // Copy all existing GridCellChars including their animation states
                     let mut c = new_char;
-                    c.animation_state = self.content_chars[i].animation_state;
+                    c.style_animation = self.content_chars[i].style_animation;
                     updated_chars.push(c);
                 } else {
                     updated_chars.push(new_char);
@@ -368,7 +366,7 @@ impl TextGrid {
             // Keep animation states for the remaining GridCellChars
             new_chars.into_iter().enumerate().for_each(|(i, new_char)| {
                 let mut c = new_char;
-                c.animation_state = self.content_chars[i].animation_state;
+                c.style_animation = self.content_chars[i].style_animation;
                 updated_chars.push(c);
             });
         // CASE 4: Text changed in the middle
@@ -385,7 +383,7 @@ impl TextGrid {
                         .iter()
                         .enumerate()
                         .for_each(|(old_idx, old_char)| {
-                            if new_char.c == old_char.c && old_char.animation_state.is_active {
+                            if new_char.c == old_char.c && old_char.style_animation.is_active(now) {
                                 position_map.push((new_idx, old_idx));
                             }
                         })
@@ -395,7 +393,7 @@ impl TextGrid {
             new_chars.into_iter().enumerate().for_each(|(i, mut c)| {
                 // Find if this position has a mapping
                 if let Some((_, old_idx)) = position_map.iter().find(|(new_idx, _)| *new_idx == i) {
-                    c.animation_state = self.content_chars[*old_idx].animation_state;
+                    c.style_animation = self.content_chars[*old_idx].style_animation;
                 }
                 updated_chars.push(c);
             })
@@ -461,6 +459,37 @@ impl TextGrid {
             .count()
     }
 
+    fn filled_cols_count(&self) -> usize {
+        self.filled_cells_count().div_ceil(self.params.rows)
+    }
+
+    /// Returns a rect defining the unfilled columns of the grid, if any.
+    fn unfilled_cols_rect(&self) -> Option<Rect> {
+        let unfilled_cols = self.params.cols.saturating_sub(self.filled_cols_count());
+
+        if unfilled_cols == 0 {
+            return None;
+        }
+
+        let left_edge_x = self.params.origin.x - self.params.width() / 2.0;
+
+        // Width of unfilled columns (with grid lines between them, but not after the last)
+        let unfilled_width = self.params.cell_width * unfilled_cols as f32
+            + self.params.grid_line_stroke * (unfilled_cols as f32 - 1.0);
+
+        // Unfilled columns start at the left edge (since filling goes right-to-left)
+        let unfilled_start_x = left_edge_x;
+
+        // Center of unfilled rect
+        let center_x = unfilled_start_x + unfilled_width / 2.0;
+        let center_y = self.params.origin.y;
+
+        Some(Rect::from_xy_wh(
+            vec2(center_x, center_y),
+            vec2(unfilled_width, self.params.height()),
+        ))
+    }
+
     /// Clears the content_chars and the latest_convo_item
     pub fn clear(&mut self) {
         self.content_chars = Vec::with_capacity(0);
@@ -510,6 +539,16 @@ impl TextGrid {
                 .no_fill()
                 .stroke(RED)
                 .stroke_weight(5.0);
+
+            let unfilled_rect = self.unfilled_cols_rect();
+            if let Some(rect) = unfilled_rect {
+                draw.rect()
+                    .xy(rect.xy())
+                    .wh(rect.wh())
+                    .no_fill()
+                    .stroke(BLUE)
+                    .stroke_weight(5.0);
+            }
         }
     }
 }
@@ -528,7 +567,7 @@ fn grid_cell_chars_from(message: &str, color: Rgba) -> Vec<GridCellChar> {
             color,
             is_visible: true,
             is_hangeul,
-            animation_state: GridCellCharAnimationState::default(),
+            style_animation: GridCellCharStyleAnimationState::default(),
         });
     }
 
