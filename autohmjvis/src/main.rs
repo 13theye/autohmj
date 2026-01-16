@@ -79,9 +79,17 @@ fn model(app: &App) -> Model {
     let latin_font = Font::from_bytes(font_bytes)
         .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
 
+    // --- Load Font for Nannou Draw (Symbols) ---
+    let font_path = assets.join("AppleSymbols.ttf");
+    let font_bytes = fs::read(&font_path)
+        .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
+    let symbol_font = Font::from_bytes(font_bytes)
+        .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
+
     let text_grid_fonts = TextGridFonts {
         hangeul: korean_font,
         latin: latin_font,
+        symbols: symbol_font,
     };
 
     // Create main output window

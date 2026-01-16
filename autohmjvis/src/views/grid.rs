@@ -27,9 +27,11 @@ const ALLOWED_PUNCTUATION: &[char] = &['?', '!', ':', ';', ',', '"', '\''];
 
 const CHARACTER_ANIMATION_DURATION: Duration = Duration::from_millis(300);
 
+#[derive(Clone, Debug)]
 pub struct TextGridFonts {
     pub hangeul: Font,
     pub latin: Font,
+    pub symbols: Font,
 }
 
 pub struct TextGridParams {
@@ -68,10 +70,7 @@ impl TextGridParams {
             .build();
 
         // Clone Fonts
-        let fonts = TextGridFonts {
-            hangeul: fonts.hangeul.clone(),
-            latin: fonts.latin.clone(),
-        };
+        let fonts = fonts.clone();
 
         Self {
             origin,
@@ -130,6 +129,16 @@ pub enum TextGridPosition {
     Left,
     Center,
     Right,
+}
+
+impl TextGridPosition {
+    pub fn sigil(&self) -> String {
+        match self {
+            TextGridPosition::Left => "⚇".to_string(),
+            TextGridPosition::Center => "☺".to_string(),
+            TextGridPosition::Right => "⚉".to_string(),
+        }
+    }
 }
 
 impl TextGridPosition {
@@ -548,26 +557,30 @@ impl TextGrid {
             )
         });
 
-        // Draw translation
-        if let Some((_idx, convo_item)) = &self.latest_convo_item {
-            // If there's a translation
-            if let Some(translation) = &convo_item.translation {
-                // and there's room to display it
-                if let Some(unfilled_rect) = self.unfilled_cols_rect() {
-                    let unfilled_cols = self.params.cols.saturating_sub(self.filled_cols_count());
-                    let rotate_sideways = unfilled_cols < 3;
+        // Draw translation if the typing animation is finished.
+        let visible_chars = self.content_chars.iter().filter(|c| c.is_visible).count();
+        if visible_chars == self.content_chars.len() {
+            if let Some((_idx, convo_item)) = &self.latest_convo_item {
+                // If there's a translation
+                if let Some(translation) = &convo_item.translation {
+                    // and there's room to display it
+                    if let Some(unfilled_rect) = self.unfilled_cols_rect() {
+                        let unfilled_cols =
+                            self.params.cols.saturating_sub(self.filled_cols_count());
+                        let rotate_sideways = unfilled_cols < 3;
 
-                    let translation_view = TranslationView {
-                        content: translation.to_owned(),
-                        rect: unfilled_rect,
-                    };
+                        let translation_view = TranslationView {
+                            content: translation.to_owned(),
+                            rect: unfilled_rect,
+                        };
 
-                    translation_view.draw(
-                        draw,
-                        &self.params.translation_text_layout,
-                        &self.params.fonts,
-                        rotate_sideways,
-                    );
+                        translation_view.draw(
+                            draw,
+                            &self.params.translation_text_layout,
+                            &self.params.fonts,
+                            rotate_sideways,
+                        );
+                    }
                 }
             }
         }
@@ -577,6 +590,10 @@ impl TextGrid {
             self.draw_margin_lines(draw);
         }
 
+        // Draw sigil
+        self.draw_sigil(draw);
+
+        // Debug
         if show_debug {
             draw.ellipse().xy(self.params.origin).radius(5.0).color(RED);
             draw.rect()
@@ -596,6 +613,32 @@ impl TextGrid {
                     .stroke_weight(5.0);
             }
         }
+    }
+
+    /// Draws the sigil at the top right of the grid
+    fn draw_sigil(&self, draw: &Draw) {
+        let x = self.params.rect().top_right().x
+            - (self.params.translation_text_layout.font_size / 2) as f32;
+
+        let y = self.params.rect().top_right().y
+            + 20.0 // an extra margin
+            + (self.params.translation_text_layout.font_size / 2) as f32;
+
+        draw.text(&self.position.sigil())
+            .x_y(x, y)
+            .layout(&self.params.translation_text_layout)
+            .font(self.params.fonts.symbols.clone())
+            .color(WHITE);
+    }
+
+    /// Draw the status at the top left of the grid
+    fn draw_status(&self, draw: &Draw) {
+        let x = self.params.rect().top_left().x
+            + (self.params.translation_text_layout.font_size / 2) as f32;
+
+        let y = self.params.rect().top_right().y
+            + 20.0 // an extra margin
+            + (self.params.translation_text_layout.font_size / 2) as f32;
     }
 
     fn draw_margin_lines(&self, draw: &Draw) {
