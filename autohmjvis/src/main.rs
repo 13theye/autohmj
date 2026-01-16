@@ -17,7 +17,7 @@ use autohmjvis::{
     server::HMJServer,
     services::{ConversationService, GemmaPersona, GemmaService, TranslationService},
     settings::{AuthConfig, GemmaConfig, GridConfig, OscSendConfig, Settings},
-    views::{BackgroundManager, TextGrid, TextGridPosition},
+    views::{BackgroundManager, TextGrid, TextGridFonts, TextGridPosition},
 };
 
 //const HUMAN_ID: &str = "Human";
@@ -27,9 +27,8 @@ fn model(app: &App) -> Model {
     // general config from the CONFIG.TOML file
     let config = Settings::load().expect("\nAuto훈민정음: FAILED TO LOAD CONFIG.TOML\n");
     // Gemma API key from the /auth/key.toml file
-    let auth_config = AuthConfig::load(&config.paths.auth).unwrap_or_else(|e| {
-        panic!("\nAuto훈민정음: FAILED TO LOAD KEY.TOML\nError: {:?}\n", e)
-    });
+    let auth_config = AuthConfig::load(&config.paths.auth)
+        .unwrap_or_else(|e| panic!("\nAuto훈민정음: FAILED TO LOAD KEY.TOML\nError: {:?}\n", e));
 
     // Gemma config from the /gemma/gemma.toml file
     let gemma_config = GemmaConfig::load(&config.paths.gemma)
@@ -79,6 +78,11 @@ fn model(app: &App) -> Model {
         .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
     let latin_font = Font::from_bytes(font_bytes)
         .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
+
+    let text_grid_fonts = TextGridFonts {
+        hangeul: korean_font,
+        latin: latin_font,
+    };
 
     // Create main output window
     let audience_window_id = app
@@ -183,6 +187,7 @@ fn model(app: &App) -> Model {
         &config.grid,
         &gemma_config,
         &config.osc_send,
+        &text_grid_fonts,
         &clock,
         &events,
     );
@@ -214,8 +219,7 @@ fn model(app: &App) -> Model {
         content,
         grids,
 
-        korean_font,
-        latin_font,
+        text_grid_fonts,
 
         audience_window_id,
         performer_window_id,
@@ -333,15 +337,9 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
         // Clear textures
         rendering.encode_clear_all_textures(&mut encoder, wgpu::Color::BLACK);
 
-        // Draw cotent
+        // Draw content
         model.grids.iter().for_each(|grid| {
-            grid.draw(
-                &rendering.draw,
-                &model.korean_font,
-                &model.latin_font,
-                model.update_time,
-                model.show_debug,
-            );
+            grid.draw(&rendering.draw, model.update_time, model.show_debug);
         });
 
         rendering.encode_draw_commands(device, &mut encoder);
@@ -404,6 +402,7 @@ fn init_three_grids(
     grid_config: &GridConfig,
     gemma_config: &GemmaConfig,
     osc_config: &OscSendConfig,
+    text_grid_fonts: &TextGridFonts,
     clock: &ClockService,
     event_bus: &HMJEventBus,
 ) -> Vec<TextGrid> {
@@ -413,6 +412,7 @@ fn init_three_grids(
         TextGridPosition::Center,
         grid_config,
         osc_config,
+        text_grid_fonts,
         clock,
         event_bus,
     );
@@ -423,6 +423,7 @@ fn init_three_grids(
         TextGridPosition::Left,
         grid_config,
         osc_config,
+        text_grid_fonts,
         clock,
         event_bus,
     );
@@ -433,6 +434,7 @@ fn init_three_grids(
         TextGridPosition::Right,
         grid_config,
         osc_config,
+        text_grid_fonts,
         clock,
         event_bus,
     );
@@ -716,18 +718,6 @@ fn draw_hud(app: &App, model: &Model) {
 // Shortcut keys are activated when the performer window is focused.
 fn key_pressed(app: &App, model: &mut Model, key: Key) {
     match key {
-        Key::Key0 => {
-            model.grids[0].sequencer.is_sending = !model.grids[0].sequencer.is_sending;
-            println!("Grid 0 send OSC: {}", model.grids[0].sequencer.is_sending);
-        }
-        Key::Key1 => {
-            model.grids[1].sequencer.is_sending = !model.grids[1].sequencer.is_sending;
-            println!("Grid 1 send OSC: {}", model.grids[1].sequencer.is_sending);
-        }
-        Key::Key2 => {
-            model.grids[2].sequencer.is_sending = !model.grids[2].sequencer.is_sending;
-            println!("Grid 2 send OSC: {}", model.grids[2].sequencer.is_sending);
-        }
         Key::Key5 => {
             model.translate.set_to_korean();
             println!("Translation set to Korean");

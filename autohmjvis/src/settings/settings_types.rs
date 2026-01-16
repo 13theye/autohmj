@@ -23,6 +23,7 @@ pub struct GridConfig {
     pub cell_width: u32,
     pub cell_height: u32,
     pub grid_line_stroke: u32,
+    pub margin_line_stroke: u32,
 }
 
 #[derive(Debug, Deserialize)]

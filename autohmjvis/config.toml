@@ -30,8 +30,9 @@ width = 1440
 height = 810
 
 [grid]
+# all in integers
 font_size_text = 100
-font_size_translation = 70
+font_size_translation = 50
 
 grid_rows = 11
 grid_cols = 8
@@ -48,6 +49,7 @@ cell_width = 140
 cell_height = 170
 # grid lines
 grid_line_stroke = 4
+margin_line_stroke = 2
 
 [paths]
 #paths are relative to executable directory

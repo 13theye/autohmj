@@ -4,9 +4,12 @@
 //!
 
 use nannou::prelude::*;
-use nannou::text::{Font, Layout};
+use nannou::text::Layout;
 
-use crate::views::{animation, grid::TextGridParams};
+use crate::views::{
+    animation,
+    {grid::TextGridParams, TextGridFonts},
+};
 use std::time::{Duration, Instant};
 
 #[derive(Copy, Clone, Debug)]
@@ -122,13 +125,12 @@ impl GridCell {
         draw: &Draw,
         grid_text_layout: &Layout,
         _translation_text_layout: &Layout,
-        font: Font,
-        alt_font: Font,
+        fonts: &TextGridFonts,
         now: Instant,
         show_debug: bool,
     ) {
         self.draw_background(draw);
-        self.draw_char(draw, grid_text_layout, font, alt_font, now);
+        self.draw_char(draw, grid_text_layout, fonts, now);
 
         if show_debug {
             draw.ellipse()
@@ -145,20 +147,15 @@ impl GridCell {
             .color(self.background.color);
     }
 
-    pub fn draw_char(
-        &self,
-        draw: &Draw,
-        layout: &Layout,
-        font: Font,
-        alt_font: Font,
-        now: Instant,
-    ) {
+    pub fn draw_char(&self, draw: &Draw, layout: &Layout, fonts: &TextGridFonts, now: Instant) {
         let Some(character) = self.content else {
             return;
         };
 
         if character.is_visible {
-            let font = if character.is_hangeul { font } else { alt_font };
+            let font = fonts.hangeul.clone();
+
+            let (x, y) = (self.params.origin.x, self.params.origin.y);
 
             // Default values if not animating
             let mut size_factor = 1.0;
@@ -192,7 +189,7 @@ impl GridCell {
             );
 
             // Use constant font size with GPU transform scaling to avoid glyph cache thrashing
-            draw.x_y(self.params.origin.x, self.params.origin.y)
+            draw.x_y(x, y)
                 .scale(size_factor)
                 .text(&character.display.to_string())
                 .font(font)

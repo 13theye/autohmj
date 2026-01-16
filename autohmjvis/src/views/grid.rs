@@ -14,7 +14,7 @@ use crate::{
     services::Sequencer,
     settings::{GridConfig, OscSendConfig},
     views::{
-        grid_cell::GridCellCharStyleAnimationState, GridCell, GridCellChar,
+        grid_cell::GridCellCharStyleAnimationState, GridCell, GridCellChar, TranslationView,
         TypingAnimationController,
     },
 };
@@ -26,6 +26,11 @@ use std::time::{Duration, Instant};
 const ALLOWED_PUNCTUATION: &[char] = &['?', '!', ':', ';', ',', '"', '\''];
 
 const CHARACTER_ANIMATION_DURATION: Duration = Duration::from_millis(300);
+
+pub struct TextGridFonts {
+    pub hangeul: Font,
+    pub latin: Font,
+}
 
 pub struct TextGridParams {
     pub origin: Vec2,
@@ -39,15 +44,16 @@ pub struct TextGridParams {
     pub cell_width: f32,
     pub cell_height: f32,
     pub grid_line_stroke: f32,
+    pub margin_line_stroke: f32,
     pub grid_text_layout: Layout,
     pub translation_text_layout: Layout,
+    pub fonts: TextGridFonts,
 }
 
 impl TextGridParams {
-    pub fn from_grid_config(grid_config: &GridConfig, origin: Vec2) -> Self {
+    pub fn init(grid_config: &GridConfig, fonts: &TextGridFonts, origin: Vec2) -> Self {
         let text_layout_builder = nannou::text::layout::Builder::default();
         let grid_text_layout = text_layout_builder
-            .line_spacing(15.0)
             .font_size(grid_config.font_size_text)
             .wrap_by_word()
             .center_justify()
@@ -55,11 +61,17 @@ impl TextGridParams {
 
         let text_layout_builder = nannou::text::layout::Builder::default();
         let translation_text_layout = text_layout_builder
-            .line_spacing(15.0)
             .font_size(grid_config.font_size_translation)
+            .line_spacing(15.0)
             .wrap_by_word()
             .center_justify()
             .build();
+
+        // Clone Fonts
+        let fonts = TextGridFonts {
+            hangeul: fonts.hangeul.clone(),
+            latin: fonts.latin.clone(),
+        };
 
         Self {
             origin,
@@ -73,8 +85,10 @@ impl TextGridParams {
             cell_width: grid_config.cell_width as f32,
             cell_height: grid_config.cell_height as f32,
             grid_line_stroke: grid_config.grid_line_stroke as f32,
+            margin_line_stroke: grid_config.margin_line_stroke as f32,
             grid_text_layout,
             translation_text_layout,
+            fonts,
         }
     }
 
@@ -111,6 +125,7 @@ impl TextGridStyle {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TextGridPosition {
     Left,
     Center,
@@ -132,7 +147,8 @@ impl TextGridPosition {
     }
 }
 
-// Handles character positioning
+/// Logical structure to handle a text grid's content, animation, and triggering of the
+/// corresponding sequencer.
 pub struct TextGrid {
     pub id: String, // author
     pub is_human: bool,
@@ -160,19 +176,21 @@ pub struct TextGrid {
 }
 
 impl TextGrid {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: &str,
         is_human: bool,
         position: TextGridPosition,
         grid_config: &GridConfig,
         osc_config: &OscSendConfig,
+        fonts: &TextGridFonts,
         clock: &ClockService,
         event_bus: &HMJEventBus,
     ) -> Self {
         // Init TextGridParams
         let origin = position.origin(grid_config);
 
-        let params = TextGridParams::from_grid_config(grid_config, origin);
+        let params = TextGridParams::init(grid_config, fonts, origin);
         let text_style = TextGridStyle::init();
 
         // Init GridCells
@@ -518,18 +536,46 @@ impl TextGrid {
             });
     }
 
-    pub fn draw(&self, draw: &Draw, font: &Font, alt_font: &Font, now: Instant, show_debug: bool) {
+    pub fn draw(&self, draw: &Draw, now: Instant, show_debug: bool) {
         self.cells.iter().for_each(|cell| {
             cell.draw(
                 draw,
                 &self.params.grid_text_layout,
                 &self.params.translation_text_layout,
-                font.clone(),
-                alt_font.clone(),
+                &self.params.fonts,
                 now,
                 show_debug,
             )
         });
+
+        // Draw translation
+        if let Some((_idx, convo_item)) = &self.latest_convo_item {
+            // If there's a translation
+            if let Some(translation) = &convo_item.translation {
+                // and there's room to display it
+                if let Some(unfilled_rect) = self.unfilled_cols_rect() {
+                    let unfilled_cols = self.params.cols.saturating_sub(self.filled_cols_count());
+                    let rotate_sideways = unfilled_cols < 3;
+
+                    let translation_view = TranslationView {
+                        content: translation.to_owned(),
+                        rect: unfilled_rect,
+                    };
+
+                    translation_view.draw(
+                        draw,
+                        &self.params.translation_text_layout,
+                        &self.params.fonts,
+                        rotate_sideways,
+                    );
+                }
+            }
+        }
+
+        // Draw margin lines
+        if self.position == TextGridPosition::Center {
+            self.draw_margin_lines(draw);
+        }
 
         if show_debug {
             draw.ellipse().xy(self.params.origin).radius(5.0).color(RED);
@@ -550,6 +596,24 @@ impl TextGrid {
                     .stroke_weight(5.0);
             }
         }
+    }
+
+    fn draw_margin_lines(&self, draw: &Draw) {
+        let left = self.params.rect().left() - self.params.grid_spacing / 2.0;
+        let right = self.params.rect().right() + self.params.grid_spacing / 2.0;
+        let top = self.params.rect().top() + self.params.top_margin / 2.0;
+        let bottom = self.params.rect().bottom() - self.params.bottom_margin / 2.0;
+
+        draw.line()
+            .start(pt2(left, top))
+            .end(pt2(left, bottom))
+            .stroke_weight(self.params.margin_line_stroke)
+            .color(WHITE);
+        draw.line()
+            .start(pt2(right, top))
+            .end(pt2(right, bottom))
+            .stroke_weight(self.params.margin_line_stroke)
+            .color(WHITE);
     }
 }
 

@@ -10,17 +10,13 @@ use crate::{
     models::LiveInputRegistry,
     server::HMJServer,
     services::{ConversationService, GemmaService, TranslationService},
-    views::{BackgroundManager, TextGrid},
+    views::{BackgroundManager, TextGrid, TextGridFonts},
 };
 use nnpipe::*;
 use prat::ClockService;
 
-use nannou::{prelude::*, text::*, wgpu::TextureReshaper};
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    time::Instant,
-};
+use nannou::{prelude::*, wgpu::TextureReshaper};
+use std::{cell::RefCell, collections::HashMap, time::Instant};
 use tokio::sync::broadcast;
 
 pub struct Model {
@@ -42,13 +38,12 @@ pub struct Model {
     pub grids: Vec<TextGrid>, // the onscreen text grids
 
     // WebSockets for client
-    pub server: HMJServer, // the WebSockets server
+    pub server: HMJServer,                        // the WebSockets server
     pub live_input_registry: LiveInputRegistry, // manages per-author watch channels for live input
     pub cursor_positions: HashMap<String, usize>, // the cursor position in the grid
 
     // Fonts
-    pub korean_font: Font, // the font for Korean text
-    pub latin_font: Font,  // the font for Latin text
+    pub text_grid_fonts: TextGridFonts, // fonts used by TextGrids
 
     // Nannou API and rendering pipeline
     pub rendering: RefCell<Nnpipe>, // the rendering pipeline
