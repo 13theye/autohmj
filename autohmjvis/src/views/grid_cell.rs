@@ -181,8 +181,7 @@ impl GridCell {
                 color_brightness = 1.0 + 0.1 * (1.0 - progress).powf(3.0);
             }
 
-            // Apply animation factors to size and color
-            let display_size = (layout.font_size as f32 * size_factor) as u32;
+            // Apply animation factors to color
             let display_color = rgba(
                 (character.color.red * color_brightness).min(1.0),
                 (character.color.green * color_brightness).min(1.0),
@@ -190,11 +189,13 @@ impl GridCell {
                 character.color.alpha,
             );
 
-            draw.text(&character.display.to_string())
+            // Use constant font size with GPU transform scaling to avoid glyph cache thrashing
+            draw.x_y(self.params.origin.x, self.params.origin.y)
+                .scale(size_factor)
+                .text(&character.display.to_string())
                 .font(font)
-                .x_y(self.params.origin.x, self.params.origin.y)
                 .color(display_color)
-                .font_size(display_size);
+                .font_size(layout.font_size);
         }
     }
 }

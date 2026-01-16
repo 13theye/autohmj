@@ -6,19 +6,14 @@
 use nannou::{prelude::*, text::*};
 use nnpipe::*;
 use prat::ClockService;
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    fs,
-    sync::{Arc, RwLock},
-};
+use std::{cell::RefCell, collections::HashMap, fs};
 
 use autohmjvis::{
     content::ContentManager,
     events::{GemmaEvent, HMJEventBus},
     fps::FpsManager,
     intro::IntroImage,
-    models::{CommandMessage, HMJMessageWrapper, HumansTurn, Model},
+    models::{CommandMessage, HMJMessageWrapper, HumansTurn, LiveInputRegistry, Model},
     server::HMJServer,
     services::{ConversationService, GemmaPersona, GemmaService, TranslationService},
     settings::{AuthConfig, GemmaConfig, GridConfig, OscSendConfig, Settings},
@@ -60,8 +55,8 @@ fn model(app: &App) -> Model {
     let mut server = HMJServer::new(config.server.port, &events);
     server.start().expect("Failed to start HMJServer");
 
-    // Initialize connections
-    let connections = Arc::new(RwLock::new(HashMap::new()));
+    // Initialize live input registry
+    let mut live_input_registry = LiveInputRegistry::new();
 
     // Initialize services
     let convo = ConversationService::new(&events);
@@ -181,7 +176,7 @@ fn model(app: &App) -> Model {
     }
 
     // Initialize three ContentManagers specific to this performance
-    let content = init_three_content_managers(&events, connections.clone(), &gemma_config);
+    let content = init_three_content_managers(&events, &mut live_input_registry, &gemma_config);
 
     // Initialize three text grids specific to this performance
     let grids = init_three_grids(
@@ -233,7 +228,7 @@ fn model(app: &App) -> Model {
         performer_draw,
 
         server,
-        connections,
+        live_input_registry,
         cursor_positions: HashMap::new(),
 
         rendering: RefCell::new(rendering),
@@ -390,16 +385,16 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
 /// Initialize three ContentManagers specific to this performance
 fn init_three_content_managers(
     event_bus: &HMJEventBus,
-    connections: Arc<RwLock<HashMap<String, String>>>,
+    live_input_registry: &mut LiveInputRegistry,
     gemma_config: &GemmaConfig,
 ) -> Vec<ContentManager> {
-    let human_content = ContentManager::new("Human", event_bus, connections.clone());
+    let human_content = ContentManager::new("Human", event_bus, live_input_registry);
 
     let gemma1_content =
-        ContentManager::new(&gemma_config.persona_1.id, event_bus, connections.clone());
+        ContentManager::new(&gemma_config.persona_1.id, event_bus, live_input_registry);
 
     let gemma2_content =
-        ContentManager::new(&gemma_config.persona_2.id, event_bus, connections.clone());
+        ContentManager::new(&gemma_config.persona_2.id, event_bus, live_input_registry);
 
     vec![human_content, gemma1_content, gemma2_content]
 }
@@ -461,7 +456,7 @@ fn receive_hmjmessage(model: &mut Model) {
     {
         // Handle convo messages
         if let Some(message) = message {
-            // Update connections map for live display or finalize messages
+            // Update live input registry for live display or finalize messages
             if message.ends_with('\n') {
                 // Create convo item
                 let entry = ConversationService::new_item(&author, &message);
@@ -472,16 +467,12 @@ fn receive_hmjmessage(model: &mut Model) {
                 // Add message to conversation
                 model.convo.add(entry);
 
-                // Clear the buffer
-                model.connections.write().unwrap().remove(&author);
+                // Clear the live input
+                model.live_input_registry.clear(&author);
                 model.humans_turn = HumansTurn::False;
             } else {
-                // Message is in progress
-                model
-                    .connections
-                    .write()
-                    .unwrap()
-                    .insert(author.to_owned(), message);
+                // Message is in progress - update the live input
+                model.live_input_registry.update(&author, message);
                 if let Some(cursor_position) = cursor_position {
                     model.cursor_positions.insert(author, cursor_position);
                 }

@@ -7,6 +7,7 @@ use crate::{
     events::GemmaEvent,
     fps::FpsManager,
     intro::IntroImage,
+    models::LiveInputRegistry,
     server::HMJServer,
     services::{ConversationService, GemmaService, TranslationService},
     views::{BackgroundManager, TextGrid},
@@ -18,7 +19,6 @@ use nannou::{prelude::*, text::*, wgpu::TextureReshaper};
 use std::{
     cell::RefCell,
     collections::HashMap,
-    sync::{Arc, RwLock},
     time::Instant,
 };
 use tokio::sync::broadcast;
@@ -43,8 +43,8 @@ pub struct Model {
 
     // WebSockets for client
     pub server: HMJServer, // the WebSockets server
-    pub connections: Arc<RwLock<HashMap<String, String>>>, // a shared reference to (key, input string) for live input
-    pub cursor_positions: HashMap<String, usize>,          // the cursor position in the grid
+    pub live_input_registry: LiveInputRegistry, // manages per-author watch channels for live input
+    pub cursor_positions: HashMap<String, usize>, // the cursor position in the grid
 
     // Fonts
     pub korean_font: Font, // the font for Korean text

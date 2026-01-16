@@ -306,6 +306,7 @@ impl TextGrid {
         self.content_chars.iter_mut().for_each(|c| {
             if now - c.animation_state.start > c.animation_state.duration {
                 c.animation_state.set_active(false);
+                c.display = c.c;
             }
         });
 

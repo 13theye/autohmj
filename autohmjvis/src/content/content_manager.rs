@@ -7,14 +7,11 @@
 use crate::{
     content::ContentEvent,
     events::HMJEventBus,
-    models::ConvoItem,
+    models::{ConvoItem, LiveInputRegistry},
     services::{ConvoEvent, TranslationEvent},
 };
 
-use tokio::sync::broadcast;
-
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use tokio::sync::{broadcast, watch};
 
 /// A tuple of (key, ConvoItem)
 pub type KeyedConvoItem = (usize, ConvoItem);
@@ -23,10 +20,7 @@ pub struct ContentManager {
     pub id: String,
 
     pub latest: Option<KeyedConvoItem>, // the latest (key, message)
-    connections: Arc<RwLock<HashMap<String, String>>>, // reference to model.connections
-
-    // Track previous live input to avoid redundant events
-    previous_live_input: String,
+    live_input_rx: watch::Receiver<String>, // watch channel for this author's live input
 
     // event tx
     content_tx: broadcast::Sender<ContentEvent>,
@@ -40,18 +34,20 @@ impl ContentManager {
     pub fn new(
         id: &str,
         event_bus: &HMJEventBus,
-        connections: Arc<RwLock<HashMap<String, String>>>,
+        live_input_registry: &mut LiveInputRegistry,
     ) -> Self {
         // Subscribe to events
         let convo_rx = event_bus.convo.subscribe();
         let translation_rx = event_bus.translation.subscribe();
         let content_tx = event_bus.content.clone();
 
+        // Subscribe to this author's live input channel
+        let live_input_rx = live_input_registry.subscribe(id);
+
         Self {
             id: id.to_owned(),
             latest: None,
-            connections,
-            previous_live_input: String::new(),
+            live_input_rx,
             convo_rx,
             translation_rx,
             content_tx,
@@ -67,30 +63,18 @@ impl ContentManager {
     // Read the live input from the human user. Compare the input string to the previous
     // state of the input string.
     fn read_live_input(&mut self) {
-        let connections_read = self.connections.read().unwrap_or_else(|poisoned| {
-            println!("Warning: Connections RwLock is poisoned: {poisoned}");
-            poisoned.into_inner()
-        });
-
-        let Some(live_msg) = connections_read.get(&self.id) else {
-            return;
-        };
-
-        let live_msg = live_msg.clone();
-
-        // Drop the lock
-        drop(connections_read);
-
-        // Don't do anything if live input hasn't changed
-        if live_msg == self.previous_live_input {
+        // Check if the live input has changed
+        if !self.live_input_rx.has_changed().unwrap_or(false) {
             return;
         }
+
+        // Get the current value and mark as seen
+        let live_msg = self.live_input_rx.borrow_and_update().clone();
 
         // Don't do anything if there's no input and there's a previous message displayed.
         // This means live input is fresh ( no new live input since human last hit Enter)
         // This ensures that the previous latest message is not immediately overwritten.
         if live_msg.is_empty() && self.latest.is_some() {
-            self.previous_live_input = live_msg;
             return;
         }
 
@@ -99,7 +83,6 @@ impl ContentManager {
         // the live input.
         if live_msg.is_empty() && self.latest.is_none() {
             self.update_latest(None);
-            self.previous_live_input = live_msg;
             return;
         }
 
@@ -113,9 +96,6 @@ impl ContentManager {
             self.id.to_owned(),
             live_msg.clone(),
         ));
-
-        // Update previous state
-        self.previous_live_input = live_msg;
     }
 
     /// Listen for events from the ConversationManager.
