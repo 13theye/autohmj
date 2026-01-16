@@ -97,6 +97,14 @@ impl TypingAnimationController {
         );
     }
 
+    pub fn check_animation_key_finished(&self, message_key: usize) -> bool {
+        let Some(animation) = self.animations.get(&message_key) else {
+            return true;
+        };
+
+        animation.complete
+    }
+
     fn tick(&mut self, now: Instant, message_key: usize) {
         if let Some(animation) = self.animations.get_mut(&message_key) {
             if !animation.complete {

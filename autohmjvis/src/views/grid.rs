@@ -302,6 +302,17 @@ impl TextGrid {
             .register(key, &self.content_chars, now);
     }
 
+    /// Returns `true` if the typing animation is in progress.
+    fn is_typing(&self) -> bool {
+        let Some(convo_item) = &self.latest_convo_item else {
+            return false;
+        };
+
+        let key = convo_item.0;
+
+        !self.typing_animation.check_animation_key_finished(key)
+    }
+
     // If this word is being sent to the sequencer, trigger the animation
     fn trigger_sequencer_animation(&mut self, now: Instant) {
         if self.content_chars.is_empty() {
@@ -558,8 +569,7 @@ impl TextGrid {
         });
 
         // Draw translation if the typing animation is finished.
-        let visible_chars = self.content_chars.iter().filter(|c| c.is_visible).count();
-        if visible_chars == self.content_chars.len() {
+        if !self.is_typing() {
             if let Some((_idx, convo_item)) = &self.latest_convo_item {
                 // If there's a translation
                 if let Some(translation) = &convo_item.translation {
