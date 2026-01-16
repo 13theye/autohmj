@@ -13,5 +13,8 @@ pub use grid_cell::{GridCell, GridCellChar};
 pub mod grid;
 pub use grid::{TextGrid, TextGridFonts, TextGridPosition};
 
+pub mod grid_status;
+pub use grid_status::GridStatusBar;
+
 pub mod translation;
 pub use translation::TranslationView;

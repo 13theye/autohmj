@@ -13,6 +13,7 @@ pub struct GoogleConfig {
 pub struct GridConfig {
     pub font_size_text: u32,
     pub font_size_translation: u32,
+    pub font_size_statusbar: u32,
     pub grid_rows: u32,
     pub grid_cols: u32,
     pub top_margin: u32,

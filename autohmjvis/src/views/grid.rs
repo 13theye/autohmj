@@ -14,8 +14,8 @@ use crate::{
     services::Sequencer,
     settings::{GridConfig, OscSendConfig},
     views::{
-        grid_cell::GridCellCharStyleAnimationState, GridCell, GridCellChar, TranslationView,
-        TypingAnimationController,
+        grid_cell::GridCellCharStyleAnimationState, grid_status::GridStatusBar, GridCell,
+        GridCellChar, TranslationView, TypingAnimationController,
     },
 };
 
@@ -49,6 +49,7 @@ pub struct TextGridParams {
     pub margin_line_stroke: f32,
     pub grid_text_layout: Layout,
     pub translation_text_layout: Layout,
+    pub statusbar_text_layout: Layout,
     pub fonts: TextGridFonts,
 }
 
@@ -66,6 +67,13 @@ impl TextGridParams {
             .font_size(grid_config.font_size_translation)
             .line_spacing(15.0)
             .wrap_by_word()
+            .center_justify()
+            .build();
+
+        let text_layout_builder = nannou::text::layout::Builder::default();
+        let statusbar_text_layout = text_layout_builder
+            .font_size(grid_config.font_size_statusbar)
+            .line_spacing(15.0)
             .center_justify()
             .build();
 
@@ -87,6 +95,7 @@ impl TextGridParams {
             margin_line_stroke: grid_config.margin_line_stroke as f32,
             grid_text_layout,
             translation_text_layout,
+            statusbar_text_layout,
             fonts,
         }
     }
@@ -170,8 +179,10 @@ pub struct TextGrid {
 
     // Current content of the Grid
     pub latest_convo_item: Option<KeyedConvoItem>,
+    pub latest_timestamp: Option<Instant>,
     pub content_chars: Vec<GridCellChar>,
     pub cells: Vec<GridCell>,
+    pub status_bar: GridStatusBar,
 
     // animation
     typing_animation: TypingAnimationController,
@@ -228,8 +239,10 @@ impl TextGrid {
             params,
             text_style,
             latest_convo_item: None,
+            latest_timestamp: None,
             content_chars: Vec::new(),
             cells,
+            status_bar: GridStatusBar::init(),
             typing_animation: animation,
             sequencer,
             content_event_rx,
@@ -253,22 +266,32 @@ impl TextGrid {
             match event {
                 ContentEvent::UpdatedLatest(id, latest) if id == self.id => {
                     self.latest_convo_item = latest;
+                    self.latest_timestamp = Some(now);
 
                     self.update_content_chars();
 
                     // Register typing animation if AI grid
                     if !self.is_human {
                         if let Some(latest) = &self.latest_convo_item {
+                            self.status_bar.set_typing(now);
                             self.register_animation(latest.0, now);
                         }
+                    } else if !self.content_chars.is_empty() {
+                        // If human, we have reached this state when the user has
+                        // hit "Enter" to send the message, so apply timestamp.
+                        self.status_bar.set_timestamp(now);
                     }
                 }
                 ContentEvent::UpdatedLiveInput(id, message) if id == self.id => {
                     self.update_with_live_message(&message, now);
+                    self.status_bar.set_typing(now);
                 }
                 ContentEvent::UpdatedTranslation(id, latest) if id == self.id => {
                     self.latest_convo_item = latest;
                     self.update_content_chars();
+                }
+                ContentEvent::GemmaRequested(id) if id == self.id => {
+                    self.status_bar.set_waiting(now);
                 }
                 _ => {} // Ignore events for other grids
             }
@@ -350,8 +373,17 @@ impl TextGrid {
             return;
         };
 
-        self.typing_animation
-            .update(key, &mut self.content_chars, now);
+        // Checking for animation key prevents repeated resetting of state to Timestamp
+        if self.typing_animation.animation_exists(key) {
+            self.typing_animation
+                .update(key, &mut self.content_chars, now);
+
+            // Note finish time of animation
+            if self.typing_animation.check_animation_key_finished(key) {
+                self.latest_timestamp = Some(now);
+                self.status_bar.set_timestamp(now)
+            }
+        }
     }
 
     /// Update the grid with a live input message
@@ -532,6 +564,7 @@ impl TextGrid {
     pub fn clear(&mut self) {
         self.content_chars = Vec::with_capacity(0);
         self.latest_convo_item = None;
+        self.latest_timestamp = None;
     }
 
     /// Propagate the content_chars to the cells
@@ -603,6 +636,9 @@ impl TextGrid {
         // Draw sigil
         self.draw_sigil(draw);
 
+        // Draw grid_status
+        self.draw_status(draw, now);
+
         // Debug
         if show_debug {
             draw.ellipse().xy(self.params.origin).radius(5.0).color(RED);
@@ -642,13 +678,19 @@ impl TextGrid {
     }
 
     /// Draw the status at the top left of the grid
-    fn draw_status(&self, draw: &Draw) {
+    fn draw_status(&self, draw: &Draw, now: Instant) {
         let x = self.params.rect().top_left().x
-            + (self.params.translation_text_layout.font_size / 2) as f32;
+            + (self.params.translation_text_layout.font_size) as f32;
 
         let y = self.params.rect().top_right().y
             + 20.0 // an extra margin
             + (self.params.translation_text_layout.font_size / 2) as f32;
+
+        draw.text(&self.status_bar.get_content(now))
+            .x_y(x, y)
+            .layout(&self.params.statusbar_text_layout)
+            .font(self.params.fonts.symbols.clone())
+            .color(WHITE);
     }
 
     fn draw_margin_lines(&self, draw: &Draw) {

@@ -33,6 +33,7 @@ height = 810
 # all in integers
 font_size_text = 100
 font_size_translation = 50
+font_size_statusbar = 30
 
 grid_rows = 11
 grid_cols = 8

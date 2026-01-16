@@ -8,7 +8,7 @@ use crate::{
     content::ContentEvent,
     events::HMJEventBus,
     models::{ConvoItem, LiveInputRegistry},
-    services::{ConvoEvent, TranslationEvent},
+    services::{ConvoEvent, GemmaEvent, TranslationEvent},
 };
 
 use tokio::sync::{broadcast, watch};
@@ -28,6 +28,7 @@ pub struct ContentManager {
     // event rx
     convo_rx: broadcast::Receiver<ConvoEvent>,
     translation_rx: broadcast::Receiver<TranslationEvent>,
+    gemma_rx: broadcast::Receiver<GemmaEvent>,
 }
 
 impl ContentManager {
@@ -39,6 +40,9 @@ impl ContentManager {
         // Subscribe to events
         let convo_rx = event_bus.convo.subscribe();
         let translation_rx = event_bus.translation.subscribe();
+        let gemma_rx = event_bus.gemma.subscribe();
+
+        // Get the Sender for this
         let content_tx = event_bus.content.clone();
 
         // Subscribe to this author's live input channel
@@ -50,6 +54,7 @@ impl ContentManager {
             live_input_rx,
             convo_rx,
             translation_rx,
+            gemma_rx,
             content_tx,
         }
     }
@@ -132,6 +137,16 @@ impl ContentManager {
                         new_entry.translation = translation;
                         self.update_translation(Some((*latest_key, new_entry)));
                     }
+                }
+            }
+        }
+
+        while let Ok(event) = self.gemma_rx.try_recv() {
+            if let GemmaEvent::GemmaRequested(id) = event {
+                if id == self.id {
+                    let _ = self
+                        .content_tx
+                        .send(ContentEvent::GemmaRequested(self.id.to_owned()));
                 }
             }
         }

@@ -211,6 +211,7 @@ name = "autohmjvis"
 version = "1.1.0"
 dependencies = [
  "autohmjcommon",
+ "chrono",
  "config",
  "deeplx",
  "futures-util",

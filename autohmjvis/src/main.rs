@@ -45,22 +45,22 @@ fn model(app: &App) -> Model {
         .expect("AutoHMJVis: fatal error: Failed to start clock");
 
     // Initialize event bus
-    let events = HMJEventBus::default();
+    let event_bus = HMJEventBus::default();
 
     // Subscribe to Gemma events
-    let gemma_rx = events.gemma.subscribe();
+    let gemma_rx = event_bus.gemma.subscribe();
 
     // Initialize & start HMJServer
-    let mut server = HMJServer::new(config.server.port, &events);
+    let mut server = HMJServer::new(config.server.port, &event_bus);
     server.start().expect("Failed to start HMJServer");
 
     // Initialize live input registry
     let mut live_input_registry = LiveInputRegistry::new();
 
     // Initialize services
-    let convo = ConversationService::new(&events);
-    let translate = TranslationService::new(&events, config.translation.enabled);
-    let ai = GemmaService::new(&gemma_config, &auth_config.google.api_key, &events);
+    let convo = ConversationService::new(&event_bus);
+    let translate = TranslationService::new(&event_bus, config.translation.enabled);
+    let ai = GemmaService::new(&gemma_config, &auth_config.google.api_key, &event_bus);
 
     // --- Load Font for Nannou Draw (Hangeul) ---
     // Assumes "assets/gulim.ttf" exists relative to the executable
@@ -188,7 +188,7 @@ fn model(app: &App) -> Model {
     }
 
     // Initialize three ContentManagers specific to this performance
-    let content = init_three_content_managers(&events, &mut live_input_registry, &gemma_config);
+    let content = init_three_content_managers(&event_bus, &mut live_input_registry, &gemma_config);
 
     // Initialize three text grids specific to this performance
     let grids = init_three_grids(
@@ -197,7 +197,7 @@ fn model(app: &App) -> Model {
         &config.osc_send,
         &text_grid_fonts,
         &clock,
-        &events,
+        &event_bus,
     );
 
     // Set up FPS manager

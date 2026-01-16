@@ -105,6 +105,10 @@ impl TypingAnimationController {
         animation.complete
     }
 
+    pub fn animation_exists(&self, message_key: usize) -> bool {
+        self.animations.contains_key(&message_key)
+    }
+
     fn tick(&mut self, now: Instant, message_key: usize) {
         if let Some(animation) = self.animations.get_mut(&message_key) {
             if !animation.complete {

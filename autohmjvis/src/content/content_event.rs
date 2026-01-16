@@ -9,4 +9,5 @@ pub enum ContentEvent {
     UpdatedLatest(String, Option<KeyedConvoItem>),
     UpdatedTranslation(String, Option<KeyedConvoItem>),
     UpdatedLiveInput(String, String),
+    GemmaRequested(String),
 }

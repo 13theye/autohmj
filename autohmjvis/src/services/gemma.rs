@@ -18,6 +18,7 @@ use crate::{
 pub enum GemmaEvent {
     GemmaReceived(GemmaResponse), // A response from a Gemma instance has been received. Also includes the response.
     ModeratorChooses(String),     // The ID of the persona who should speak next
+    GemmaRequested(String),       // A request has been sent to a Gemma instance (ID)
 }
 
 pub struct GemmaService {
@@ -110,6 +111,12 @@ impl GemmaService {
         if let Some(runtime) = &self.runtime {
             let tx = gemma_instance.tx.clone();
             let mut shutdown_rx = self.shutdown_tx.subscribe();
+
+            // Emit a notification that an AI request has been sent
+            let _ = self
+                .event_tx
+                .send(GemmaEvent::GemmaRequested(gemma_instance.id.to_owned()));
+
             runtime.spawn(async move {
                 println!("Gemma async task created");
 

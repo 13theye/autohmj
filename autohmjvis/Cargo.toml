@@ -6,6 +6,7 @@ edition = "2021"
 
 [dependencies]
 autohmjcommon = { path = "../autohmjcommon" }
+chrono = "0.4"
 config = "0.15"
 deeplx = { version = "1", default-features = false }
 futures-util = "0.3"
