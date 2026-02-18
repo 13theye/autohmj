@@ -33,9 +33,13 @@ impl GridStatusBar {
         }
     }
 
-    pub fn set_typing(&mut self, now: Instant) {
+    /// Returns `true` if the typing animation has just begun
+    pub fn set_typing(&mut self, now: Instant) -> bool {
         if self.status != GridStatus::Typing {
             self.set_status(GridStatus::Typing, now);
+            true
+        } else {
+            false
         }
     }
 

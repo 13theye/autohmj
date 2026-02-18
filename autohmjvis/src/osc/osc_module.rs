@@ -75,4 +75,28 @@ impl OscSender {
             .send((addr, args), (self.target_addr.as_str(), self.target_port))
             .ok();
     }
+
+    pub fn send_ai_requested(&self, id: &str) {
+        let addr = "/hunmin/AIRequested".to_string();
+        let args = vec![osc::Type::String(id.to_string())];
+        self.sender
+            .send((addr, args), (self.target_addr.as_str(), self.target_port))
+            .ok();
+    }
+
+    pub fn send_ai_typing(&self, id: &str) {
+        let addr = "/hunmin/AITyping".to_string();
+        let args = vec![osc::Type::String(id.to_string())];
+        self.sender
+            .send((addr, args), (self.target_addr.as_str(), self.target_port))
+            .ok();
+    }
+
+    pub fn send_ai_finished(&self, id: &str) {
+        let addr = "/hunmin/AIFinished".to_string();
+        let args = vec![osc::Type::String(id.to_string())];
+        self.sender
+            .send((addr, args), (self.target_addr.as_str(), self.target_port))
+            .ok();
+    }
 }

@@ -11,6 +11,7 @@ use tokio::sync::broadcast;
 use crate::{
     content::{ContentEvent, KeyedConvoItem},
     events::HMJEventBus,
+    osc::OscSender,
     services::Sequencer,
     settings::{GridConfig, OscSendConfig},
     views::{
@@ -193,6 +194,9 @@ pub struct TextGrid {
     // events
     content_event_rx: broadcast::Receiver<ContentEvent>,
     beat_rx: broadcast::Receiver<BeatEvent>,
+
+    // OSC sender (for AI-related events)
+    osc_sender: OscSender,
 }
 
 impl TextGrid {
@@ -231,6 +235,9 @@ impl TextGrid {
         // Sequencer
         let sequencer = Sequencer::new(id, osc_config);
 
+        // OSC Sender
+        let osc_sender = OscSender::new(osc_config).expect("Failed to create OSC Sender");
+
         Self {
             id: id.to_owned(),
             is_human,
@@ -247,6 +254,7 @@ impl TextGrid {
             sequencer,
             content_event_rx,
             beat_rx,
+            osc_sender,
         }
     }
 
@@ -273,7 +281,13 @@ impl TextGrid {
                     // Register typing animation if AI grid
                     if !self.is_human {
                         if let Some(latest) = &self.latest_convo_item {
-                            self.status_bar.set_typing(now);
+                            let started_typing = self.status_bar.set_typing(now);
+
+                            if started_typing {
+                                // Send OSC event for AI started typing
+                                self.osc_sender.send_ai_typing(&self.id);
+                            }
+
                             self.register_animation(latest.0, now);
                         }
                     } else if !self.content_chars.is_empty() {
@@ -292,6 +306,9 @@ impl TextGrid {
                 }
                 ContentEvent::GemmaRequested(id) if id == self.id => {
                     self.status_bar.set_waiting(now);
+
+                    // Send OSC event for AI requested
+                    self.osc_sender.send_ai_requested(&self.id);
                 }
                 _ => {} // Ignore events for other grids
             }
@@ -381,7 +398,10 @@ impl TextGrid {
             // Note finish time of animation
             if self.typing_animation.check_animation_key_finished(key) {
                 self.latest_timestamp = Some(now);
-                self.status_bar.set_timestamp(now)
+                self.status_bar.set_timestamp(now);
+
+                // Send OSC event for AI finished typing
+                self.osc_sender.send_ai_finished(&self.id);
             }
         }
     }
