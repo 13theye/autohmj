@@ -122,14 +122,33 @@ pub struct TextGridStyle {
     pub cell_bgcolor: Rgba,
 }
 
-impl TextGridStyle {
-    pub fn init() -> Self {
+impl Default for TextGridStyle {
+    fn default() -> Self {
         Self {
-            base_color: Rgba::new(0.0, 0.0, 0.0, 1.0),
-            translation_color: Rgba::new(1.0, 1.0, 1.0, 1.0),
+            base_color: rgba(0.0, 0.0, 0.0, 1.0),
+            translation_color: rgba(1.0, 1.0, 1.0, 1.0),
             font_size: 60,
             translation_font_size: 40,
-            cell_bgcolor: Rgba::new(1.0, 1.0, 1.0, 1.0),
+            cell_bgcolor: rgba(1.0, 1.0, 1.0, 1.0),
+        }
+    }
+}
+
+impl TextGridStyle {
+    pub fn init_white() -> Self {
+        Self {
+            base_color: rgba(0.0, 0.0, 0.0, 1.0),
+            translation_color: rgba(1.0, 1.0, 1.0, 1.0),
+            font_size: 60,
+            translation_font_size: 40,
+            cell_bgcolor: rgba(1.0, 1.0, 1.0, 1.0),
+        }
+    }
+
+    pub fn init_teal() -> Self {
+        Self {
+            cell_bgcolor: rgba(0.486, 0.706, 0.702, 1.0),
+            ..Default::default()
         }
     }
 }
@@ -215,7 +234,11 @@ impl TextGrid {
         let origin = position.origin(grid_config);
 
         let params = TextGridParams::init(grid_config, fonts, origin);
-        let text_style = TextGridStyle::init();
+        let text_style = if is_human {
+            TextGridStyle::init_teal()
+        } else {
+            TextGridStyle::init_white()
+        };
 
         // Init GridCells
         let cells = (0..grid_config.grid_cols)
@@ -595,7 +618,7 @@ impl TextGrid {
             .for_each(|(i, cell)| match self.content_chars.get(i) {
                 Some(character) => {
                     if character.is_visible {
-                        cell.background.white()
+                        cell.background.fill(self.text_style.cell_bgcolor)
                     } else {
                         cell.background.blank()
                     }

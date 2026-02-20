@@ -36,9 +36,9 @@ impl GridCellBackground {
         self.color = Rgba::new(0.0, 0.0, 0.0, 0.0);
     }
 
-    /// Set background to white
-    pub fn white(&mut self) {
-        self.color = Rgba::new(1.0, 1.0, 1.0, 1.0);
+    /// Set background to bgcolor
+    pub fn fill(&mut self, color: Rgba) {
+        self.color = color;
     }
 }
 
