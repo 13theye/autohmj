@@ -15,9 +15,7 @@ use autohmjvis::{
     intro::IntroImage,
     models::{CommandMessage, HMJMessageWrapper, HumansTurn, LiveInputRegistry, Model},
     server::HMJServer,
-    services::{
-        ConversationService, GemmaPersona, GemmaService, TranslationService, TranslationServiceId,
-    },
+    services::{ConversationService, GemmaPersona, GemmaService, TranslationService},
     settings::{AuthConfig, GemmaConfig, GridConfig, OscSendConfig, Settings},
     views::{BackgroundManager, TextGrid, TextGridFonts, TextGridPosition},
 };
@@ -63,14 +61,9 @@ fn model(app: &App) -> Model {
     let convo = ConversationService::new(&event_bus);
 
     let translate = TranslationService::new(
-        TranslationServiceId::First,
         &event_bus,
         config.translation.target_language,
         config.translation.enabled,
-    );
-    let translate2 = TranslationService::new(
-        TranslationServiceId::Second,
-        &event_bus,
         config.translation.second_target_language,
         config.translation.enable_second_language,
     );
@@ -232,7 +225,6 @@ fn model(app: &App) -> Model {
 
         convo,
         translate,
-        translate2,
         ai,
         clock,
 
@@ -284,7 +276,6 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
 
     // Update services
     model.translate.update();
-    model.translate2.update();
     model.ai.update();
     model.server.update();
 
@@ -742,29 +733,14 @@ fn draw_hud(app: &App, model: &Model) {
 // Shortcut keys are activated when the performer window is focused.
 fn key_pressed(app: &App, model: &mut Model, key: Key) {
     match key {
-        Key::Key5 => {
-            model.translate.set_to_korean();
-            println!("Translation set to Korean");
-        }
-        Key::Key6 => {
-            model.translate.set_to_english();
-            println!("Translation set to English");
-        }
-        /*
-        Key::Key7 => {
-            model.translate.set_to_french();
-            println!("Translation set to French");
+        Key::T => {
+            model.translate.toggle_first_enabled();
         }
 
-        Key::T => {
-            model.translate.toggle_enabled();
-            if model.translate.is_enabled() {
-                println!("Translation enabled");
-            } else {
-                println!("Translation disabled");
-            }
+        Key::Y => {
+            model.translate.toggle_second_enabled();
         }
-        */
+
         Key::P => {
             model.show_fps = !model.show_fps;
             model.fps.toggle();
@@ -776,7 +752,6 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
             model.intro_image.toggle_visible();
         }
         Key::Escape => {
-            //shutdown(model);
             app.quit();
         }
         _ => {}

@@ -9,5 +9,5 @@ pub use sequencer::Sequencer;
 
 pub mod translate;
 pub use translate::{
-    Translate, TranslationEvent, TranslationLanguage, TranslationService, TranslationServiceId,
+    Translate, TranslationEvent, TranslationLanguage, TranslationLanguageSlot, TranslationService,
 };

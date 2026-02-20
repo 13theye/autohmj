@@ -24,10 +24,9 @@ pub struct Model {
     pub intro_image: IntroImage,       // the intro image
 
     // Services
-    pub convo: ConversationService,     // handles the conversation
-    pub translate: TranslationService,  // handles translation
-    pub translate2: TranslationService, // second language translation
-    pub ai: GemmaService,               // handles the AI
+    pub convo: ConversationService,    // handles the conversation
+    pub translate: TranslationService, // handles translation for both language slots
+    pub ai: GemmaService,              // handles the AI
     pub clock: ClockService,            // handles the clock
 
     // Conversation channel (for moderator)

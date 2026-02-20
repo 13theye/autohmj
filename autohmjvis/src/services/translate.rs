@@ -21,68 +21,69 @@ pub enum TranslationEvent {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub enum TranslationServiceId {
+pub enum TranslationLanguageSlot {
     First,
     Second,
 }
 
 // Controller module for translations
 pub struct TranslationService {
-    id: TranslationServiceId,
     translate: Arc<Translate>, // Translation API entry point
-    pub translation_language: TranslationLanguage, // the destination language
-    pub enabled: bool,         // whether translation is enabled
 
-    // Asynchronous translation
-    pub runtime: Option<tokio::runtime::Runtime>, // the runtime for the translation
-    translation_tx: mpsc::Sender<(usize, Option<String>, TranslationServiceId)>, // the channel for sending translations
-    translation_rx: mpsc::Receiver<(usize, Option<String>, TranslationServiceId)>, // the channel for receiving translations
+    // First language slot
+    pub first_language: TranslationLanguage,
+    pub first_enabled: bool,
+
+    // Second language slot
+    pub second_language: TranslationLanguage,
+    pub second_enabled: bool,
+
+    // Single shared async channel — TranslationServiceId in payload routes results
+    pub runtime: Option<tokio::runtime::Runtime>,
+    translation_tx: mpsc::Sender<(usize, Option<String>, TranslationLanguageSlot)>,
+    translation_rx: mpsc::Receiver<(usize, Option<String>, TranslationLanguageSlot)>,
 
     // Events channel
-    event_tx: broadcast::Sender<TranslationEvent>, // the channel for sending translation events
-    history_rx: broadcast::Receiver<ConvoEvent>,   // subscribe to HistoryEvents
+    event_tx: broadcast::Sender<TranslationEvent>,
+    history_rx: broadcast::Receiver<ConvoEvent>,
 
     // Shutdown signal
-    shutdown_tx: broadcast::Sender<()>, // Sender for shutdown signal
+    shutdown_tx: broadcast::Sender<()>,
 }
 
 impl TranslationService {
     pub fn new(
-        id: TranslationServiceId,
         events: &HMJEventBus,
-        translation_lang_code: String,
-        enabled: bool,
+        first_lang_code: String,
+        first_enabled: bool,
+        second_lang_code: String,
+        second_enabled: bool,
     ) -> Self {
-        // Set up eventbus send
         let event_tx = events.translation.clone();
-
-        // Subscribe to other events
         let history_rx = events.convo.subscribe();
 
-        // Set up async channel
         let (translation_tx, translation_rx) =
-            mpsc::channel::<(usize, Option<String>, TranslationServiceId)>(16);
+            mpsc::channel::<(usize, Option<String>, TranslationLanguageSlot)>(16);
 
-        // Set up tokio translation runtime
         let translation_runtime =
             tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime for translation");
 
-        // Set up shutdown listener
         let (shutdown_tx, _) = broadcast::channel(1);
 
-        // Set up translation language
-        let translation_language = TranslationLanguage::from(translation_lang_code);
+        let first_language = TranslationLanguage::from(first_lang_code);
+        let second_language = TranslationLanguage::from(second_lang_code);
 
         println!(
-            "Created TranslationService for {:?}, with enabled = {}",
-            translation_language, enabled
+            "Created TranslationService: first={:?} (enabled={}), second={:?} (enabled={})",
+            first_language, first_enabled, second_language, second_enabled
         );
 
         Self {
-            id,
             translate: Arc::new(Translate::default()),
-            translation_language,
-            enabled,
+            first_language,
+            first_enabled,
+            second_language,
+            second_enabled,
             runtime: Some(translation_runtime),
             translation_tx,
             translation_rx,
@@ -97,48 +98,55 @@ impl TranslationService {
         self.receive_translations();
     }
 
-    // Translation services listens for a new ConvoItem and then attempts to translate the message.
+    // Listen for new ConvoItems and spawn a translation task for each enabled language slot.
     fn process_events(&mut self) {
-        // Skip processing if translation is disabled
-        if !self.enabled {
-            return;
-        }
-
         while let Ok(event) = self.history_rx.try_recv() {
             if let ConvoEvent::ItemAdded(key, item) = event {
-                if item.translation.is_none() && !item.message.trim().is_empty() {
+                if item.message.trim().is_empty() {
+                    continue;
+                }
+                if self.first_enabled && item.translation.is_none() {
                     self.request_translation(
                         key,
                         item.message.clone(),
                         self.translate.clone(),
-                        self.translation_language.clone(),
+                        self.first_language.clone(),
+                        TranslationLanguageSlot::First,
+                    );
+                }
+                if self.second_enabled && item.translation2.is_none() {
+                    self.request_translation(
+                        key,
+                        item.message.clone(),
+                        self.translate.clone(),
+                        self.second_language.clone(),
+                        TranslationLanguageSlot::Second,
                     );
                 }
             }
         }
     }
 
-    // Spawns a new async task to translate the message.
+    // Spawns a new async task to translate the message for the given language slot.
     fn request_translation(
         &mut self,
         key: usize,
         msg: String,
         translate: Arc<Translate>,
         translation_type: TranslationLanguage,
+        slot: TranslationLanguageSlot,
     ) {
         if let Some(runtime) = &self.runtime {
             let tx = self.translation_tx.clone();
             let mut shutdown_rx = self.shutdown_tx.subscribe();
-            let source_id = self.id;
             runtime.spawn(async move {
-                // Spawn shutdown future
                 let shutdown = async {
                     let _ = shutdown_rx.recv().await;
                 };
 
                 let task = async {
                     let (translation, source) = translate
-                        .get_translation(&msg, "auto", translation_type.code(), source_id)
+                        .get_translation(&msg, "auto", translation_type.code(), slot)
                         .await;
                     let _ = tx.send((key, translation, source)).await;
                 };
@@ -155,47 +163,27 @@ impl TranslationService {
         }
     }
 
-    // Receive completed translations, update convo by emitting a TranslationEvent::ItemTranslated event.
+    // Receive completed translations and emit TranslationEvent::ItemTranslated.
+    // The TranslationServiceId in the payload determines which slot (first or second) was translated.
     fn receive_translations(&mut self) {
         while let Ok((key, translation, source)) = self.translation_rx.try_recv() {
-            // Filter out translations initiated by other translation sources
-            if source != self.id {
-                return;
-            }
-
             let _ = self.event_tx.send(TranslationEvent::ItemTranslated {
                 key,
                 translation,
-                is_2nd_translation: matches!(source, TranslationServiceId::Second),
+                is_2nd_translation: matches!(source, TranslationLanguageSlot::Second),
             });
         }
     }
 
-    // Set translation types
-    pub fn set_to_english(&mut self) {
-        self.translation_language = TranslationLanguage::English;
-    }
-    pub fn set_to_french(&mut self) {
-        self.translation_language = TranslationLanguage::French;
-    }
-    pub fn set_to_korean(&mut self) {
-        self.translation_language = TranslationLanguage::Korean;
-    }
-    pub fn set_to_spanish(&mut self) {
-        self.translation_language = TranslationLanguage::Spanish;
+    // Toggle/set the first language slot enabled state
+    pub fn toggle_first_enabled(&mut self) {
+        self.first_enabled = !self.first_enabled;
+        println!("First language slot enabled: {}", self.first_enabled);
     }
 
-    // Toggle translation on/off
-    pub fn toggle_enabled(&mut self) {
-        self.enabled = !self.enabled;
-    }
-
-    pub fn set_enabled(&mut self, enabled: bool) {
-        self.enabled = enabled;
-    }
-
-    pub fn is_enabled(&self) -> bool {
-        self.enabled
+    pub fn toggle_second_enabled(&mut self) {
+        self.second_enabled = !self.second_enabled;
+        println!("Second language slot enabled: {}", self.second_enabled);
     }
 
     fn shutdown(&mut self) {
@@ -292,8 +280,8 @@ impl Translate {
         input: &str,
         source_lang: &str,
         target_lang: &str,
-        source_id: TranslationServiceId,
-    ) -> (Option<String>, TranslationServiceId) {
+        source_id: TranslationLanguageSlot,
+    ) -> (Option<String>, TranslationLanguageSlot) {
         let result = self
             .translator
             .translate(source_lang, target_lang, input, None, None)
