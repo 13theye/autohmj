@@ -134,10 +134,10 @@ fn decompose_character(ch: char) -> Vec<char> {
     // Use the hangeul crate to decompose the character into its component jamo,
     // transform the hangeul::Decomposed tuple (char, char, Option<char>) into a vector of chars
     if let Ok(result) = hangeul::decompose_char(&ch) {
-        if result.2.is_none() {
-            return vec![result.0, result.1];
+        if let Some(b) = result.2 {
+            return vec![result.0, result.1, b];
         } else {
-            return vec![result.0, result.1, result.2.unwrap()];
+            return vec![result.0, result.1];
         }
     }
     // return an empty Vec if decomposition fails
