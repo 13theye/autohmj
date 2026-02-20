@@ -732,7 +732,7 @@ impl TextGrid {
             .x_y(x, y)
             .layout(&self.params.translation_text_layout)
             .font(self.params.fonts.symbols.clone())
-            .color(WHITE);
+            .color(self.text_style.cell_bgcolor);
     }
 
     /// Draw the status at the top left of the grid
@@ -748,7 +748,7 @@ impl TextGrid {
             .x_y(x, y)
             .layout(&self.params.statusbar_text_layout)
             .font(self.params.fonts.symbols.clone())
-            .color(WHITE);
+            .color(self.text_style.cell_bgcolor);
     }
 
     fn draw_margin_lines(&self, draw: &Draw) {
