@@ -18,7 +18,7 @@ impl TranslationView {
         self.rect = rect;
     }
 
-    pub fn draw(&self, draw: &Draw, layout: &Layout, fonts: &TextGridFonts, rotate_sideways: bool) {
+    pub fn draw(&self, draw: &Draw, layout: &Layout, fonts: &TextGridFonts, rotate_sideways: bool, color: Rgba) {
         let content = &self.content.to_uppercase();
 
         // Replace spaces with linebreaks for a word-per-line layout
@@ -33,7 +33,7 @@ impl TranslationView {
                 .wh(vec2(self.rect.wh().y, self.rect.wh().x))
                 .layout(layout)
                 .font(fonts.latin.clone())
-                .color(WHITE);
+                .color(color);
         } else {
             // Draw normally
             draw.text(&word_per_line_content)
@@ -41,7 +41,7 @@ impl TranslationView {
                 .wh(self.rect.wh())
                 .layout(layout)
                 .font(fonts.latin.clone())
-                .color(WHITE);
+                .color(color);
         }
     }
 }

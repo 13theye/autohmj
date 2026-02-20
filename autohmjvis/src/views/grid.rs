@@ -679,6 +679,7 @@ impl TextGrid {
                             &self.params.translation_text_layout,
                             &self.params.fonts,
                             rotate_sideways,
+                            self.text_style.cell_bgcolor,
                         );
                     }
                 }
