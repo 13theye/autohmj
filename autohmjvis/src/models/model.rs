@@ -24,10 +24,11 @@ pub struct Model {
     pub intro_image: IntroImage,       // the intro image
 
     // Services
-    pub convo: ConversationService,    // handles the conversation
-    pub translate: TranslationService, // handles translation
-    pub ai: GemmaService,              // handles the AI
-    pub clock: ClockService,           // handles the clock
+    pub convo: ConversationService,     // handles the conversation
+    pub translate: TranslationService,  // handles translation
+    pub translate2: TranslationService, // second language translation
+    pub ai: GemmaService,               // handles the AI
+    pub clock: ClockService,            // handles the clock
 
     // Conversation channel (for moderator)
     pub gemma_rx: broadcast::Receiver<GemmaEvent>, // the channel for Gemma events

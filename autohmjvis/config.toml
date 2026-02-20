@@ -67,3 +67,9 @@ intro_image = "intro.png"
 [translation]
 # Enable or disable automatic translation of conversation messages
 enabled = true
+# Enable or disable a second automatic translation of conversation messages
+enable_second_language = true
+# Target language
+target_language = "en"
+# Second target language
+second_target_language = "es"

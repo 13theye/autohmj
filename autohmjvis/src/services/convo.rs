@@ -2,7 +2,7 @@
 //
 // Interface for the ConversationManager data model
 
-use crate::events::{HMJEventBus, GemmaEvent, ServerEvent, TranslationEvent};
+use crate::events::{GemmaEvent, HMJEventBus, ServerEvent, TranslationEvent};
 use crate::models::{Conversation, ConversationManager, ConvoItem};
 
 use tokio::sync::broadcast;
@@ -63,9 +63,14 @@ impl ConversationService {
     fn process_events(&mut self) {
         // Receive messages from TranslationService
         while let Ok(event) = self.translation_rx.try_recv() {
-            if let TranslationEvent::ItemTranslated(key, translation) = event {
+            if let TranslationEvent::ItemTranslated {
+                key,
+                translation,
+                is_2nd_translation,
+            } = event
+            {
                 // Add translation to conversation
-                self.add_translation(key, translation);
+                self.add_translation(key, translation, is_2nd_translation);
 
                 // Broadcast Conversation
                 let _ = self.event_tx.send(ConvoEvent::BroadcastConvoCommand(
@@ -116,8 +121,14 @@ impl ConversationService {
     }
 
     // Add a translation to a ConvoItem model entry via the ConversationManager
-    fn add_translation(&mut self, key: usize, translation: Option<String>) {
-        self.conversation.add_translation(key, translation);
+    fn add_translation(
+        &mut self,
+        key: usize,
+        translation: Option<String>,
+        is_2nd_translation: bool,
+    ) {
+        self.conversation
+            .add_translation(key, translation, is_2nd_translation);
     }
 
     // Get a reference to the Entries of a conversation

@@ -12,20 +12,31 @@ use crate::events::{ConvoEvent, HMJEventBus};
 // Event interface
 #[derive(Clone, Debug)]
 pub enum TranslationEvent {
-    ItemTranslated(usize, Option<String>), // key, translation
+    ItemTranslated {
+        key: usize,
+        translation: Option<String>,
+        is_2nd_translation: bool,
+    },
     DefaultEvent,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum TranslationServiceId {
+    First,
+    Second,
 }
 
 // Controller module for translations
 pub struct TranslationService {
-    translate: Arc<Translate>,             // Translation API entry point
-    pub translation_type: TranslationType, // the destination language
-    pub enabled: bool,                     // whether translation is enabled
+    id: TranslationServiceId,
+    translate: Arc<Translate>, // Translation API entry point
+    pub translation_language: TranslationLanguage, // the destination language
+    pub enabled: bool,         // whether translation is enabled
 
     // Asynchronous translation
     pub runtime: Option<tokio::runtime::Runtime>, // the runtime for the translation
-    translation_tx: mpsc::Sender<(usize, Option<String>)>, // the channel for sending translations
-    translation_rx: mpsc::Receiver<(usize, Option<String>)>, // the channel for receiving translations
+    translation_tx: mpsc::Sender<(usize, Option<String>, TranslationServiceId)>, // the channel for sending translations
+    translation_rx: mpsc::Receiver<(usize, Option<String>, TranslationServiceId)>, // the channel for receiving translations
 
     // Events channel
     event_tx: broadcast::Sender<TranslationEvent>, // the channel for sending translation events
@@ -36,7 +47,12 @@ pub struct TranslationService {
 }
 
 impl TranslationService {
-    pub fn new(events: &HMJEventBus, enabled: bool) -> Self {
+    pub fn new(
+        id: TranslationServiceId,
+        events: &HMJEventBus,
+        translation_lang_code: String,
+        enabled: bool,
+    ) -> Self {
         // Set up eventbus send
         let event_tx = events.translation.clone();
 
@@ -44,7 +60,8 @@ impl TranslationService {
         let history_rx = events.convo.subscribe();
 
         // Set up async channel
-        let (translation_tx, translation_rx) = mpsc::channel::<(usize, Option<String>)>(16);
+        let (translation_tx, translation_rx) =
+            mpsc::channel::<(usize, Option<String>, TranslationServiceId)>(16);
 
         // Set up tokio translation runtime
         let translation_runtime =
@@ -53,9 +70,18 @@ impl TranslationService {
         // Set up shutdown listener
         let (shutdown_tx, _) = broadcast::channel(1);
 
+        // Set up translation language
+        let translation_language = TranslationLanguage::from(translation_lang_code);
+
+        println!(
+            "Created TranslationService for {:?}, with enabled = {}",
+            translation_language, enabled
+        );
+
         Self {
+            id,
             translate: Arc::new(Translate::default()),
-            translation_type: TranslationType::ToEnglish,
+            translation_language,
             enabled,
             runtime: Some(translation_runtime),
             translation_tx,
@@ -85,7 +111,7 @@ impl TranslationService {
                         key,
                         item.message.clone(),
                         self.translate.clone(),
-                        self.translation_type.clone(),
+                        self.translation_language.clone(),
                     );
                 }
             }
@@ -98,11 +124,12 @@ impl TranslationService {
         key: usize,
         msg: String,
         translate: Arc<Translate>,
-        translation_type: TranslationType,
+        translation_type: TranslationLanguage,
     ) {
         if let Some(runtime) = &self.runtime {
             let tx = self.translation_tx.clone();
             let mut shutdown_rx = self.shutdown_tx.subscribe();
+            let source_id = self.id;
             runtime.spawn(async move {
                 // Spawn shutdown future
                 let shutdown = async {
@@ -110,12 +137,10 @@ impl TranslationService {
                 };
 
                 let task = async {
-                    let translation = match translation_type {
-                        TranslationType::ToKorean => translate.to_korean(&msg).await,
-                        TranslationType::ToEnglish => translate.to_english(&msg).await,
-                        TranslationType::ToFrench => translate.to_french(&msg).await,
-                    };
-                    let _ = tx.send((key, translation)).await;
+                    let (translation, source) = translate
+                        .get_translation(&msg, "auto", translation_type.code(), source_id)
+                        .await;
+                    let _ = tx.send((key, translation, source)).await;
                 };
 
                 tokio::select! {
@@ -132,22 +157,32 @@ impl TranslationService {
 
     // Receive completed translations, update convo by emitting a TranslationEvent::ItemTranslated event.
     fn receive_translations(&mut self) {
-        while let Ok((key, translation)) = self.translation_rx.try_recv() {
-            let _ = self
-                .event_tx
-                .send(TranslationEvent::ItemTranslated(key, translation));
+        while let Ok((key, translation, source)) = self.translation_rx.try_recv() {
+            // Filter out translations initiated by other translation sources
+            if source != self.id {
+                return;
+            }
+
+            let _ = self.event_tx.send(TranslationEvent::ItemTranslated {
+                key,
+                translation,
+                is_2nd_translation: matches!(source, TranslationServiceId::Second),
+            });
         }
     }
 
     // Set translation types
     pub fn set_to_english(&mut self) {
-        self.translation_type = TranslationType::ToEnglish;
+        self.translation_language = TranslationLanguage::English;
     }
     pub fn set_to_french(&mut self) {
-        self.translation_type = TranslationType::ToFrench;
+        self.translation_language = TranslationLanguage::French;
     }
     pub fn set_to_korean(&mut self) {
-        self.translation_type = TranslationType::ToKorean;
+        self.translation_language = TranslationLanguage::Korean;
+    }
+    pub fn set_to_spanish(&mut self) {
+        self.translation_language = TranslationLanguage::Spanish;
     }
 
     // Toggle translation on/off
@@ -194,10 +229,43 @@ impl Drop for TranslationService {
 
 // The destination language for translation.
 #[derive(Debug, Clone, PartialEq)]
-pub enum TranslationType {
-    ToEnglish,
-    ToFrench,
-    ToKorean,
+pub enum TranslationLanguage {
+    English,
+    French,
+    Korean,
+    Spanish,
+}
+
+impl TranslationLanguage {
+    pub fn code(&self) -> &'static str {
+        match self {
+            TranslationLanguage::English => "en",
+            TranslationLanguage::French => "fr",
+            TranslationLanguage::Korean => "ko",
+            TranslationLanguage::Spanish => "es",
+        }
+    }
+}
+
+impl<T> From<T> for TranslationLanguage
+where
+    T: AsRef<str>,
+{
+    fn from(s: T) -> Self {
+        let s = s.as_ref().trim();
+
+        if s.eq_ignore_ascii_case("en") {
+            TranslationLanguage::English
+        } else if s.eq_ignore_ascii_case("fr") {
+            TranslationLanguage::French
+        } else if s.eq_ignore_ascii_case("ko") {
+            TranslationLanguage::Korean
+        } else if s.eq_ignore_ascii_case("es") {
+            TranslationLanguage::Spanish
+        } else {
+            TranslationLanguage::English
+        }
+    }
 }
 
 // The DeepLX translation API entry point.
@@ -219,35 +287,24 @@ impl Default for Translate {
 
 impl Translate {
     // Get a translation from the DeepLX API.
-    async fn get_translation(
+    pub async fn get_translation(
         &self,
         input: &str,
         source_lang: &str,
         target_lang: &str,
-    ) -> Option<String> {
+        source_id: TranslationServiceId,
+    ) -> (Option<String>, TranslationServiceId) {
         let result = self
             .translator
             .translate(source_lang, target_lang, input, None, None)
             .await;
 
         match result {
-            Ok(res) => Some(res.data.trim_end().to_owned()),
+            Ok(res) => (Some(res.data.trim_end().to_owned()), source_id),
             Err(e) => {
                 eprintln!("Error in Translate: {}", e);
-                None
+                (None, source_id)
             }
         }
-    }
-
-    pub async fn to_english(&self, input: &str) -> Option<String> {
-        self.get_translation(input, "auto", "en").await
-    }
-
-    pub async fn to_korean(&self, input: &str) -> Option<String> {
-        self.get_translation(input, "auto", "ko").await
-    }
-
-    pub async fn to_french(&self, input: &str) -> Option<String> {
-        self.get_translation(input, "auto", "fr").await
     }
 }

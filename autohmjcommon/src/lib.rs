@@ -45,6 +45,7 @@ pub struct ConvoItem {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub translation: Option<String>,
+    pub translation2: Option<String>,
 }
 impl ConvoItem {
     pub fn new(author: &str, message: &str) -> Self {
@@ -57,6 +58,7 @@ impl ConvoItem {
             author: author.to_owned(),
             message: message.to_owned(),
             translation: None,
+            translation2: None,
         }
     }
 }

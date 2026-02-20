@@ -8,4 +8,6 @@ pub mod sequencer;
 pub use sequencer::Sequencer;
 
 pub mod translate;
-pub use translate::{Translate, TranslationEvent, TranslationService, TranslationType};
+pub use translate::{
+    Translate, TranslationEvent, TranslationLanguage, TranslationService, TranslationServiceId,
+};

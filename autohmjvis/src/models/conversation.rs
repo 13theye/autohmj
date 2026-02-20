@@ -40,9 +40,18 @@ impl ConversationManager {
     }
 
     // Add a translation to a ConvoItem
-    pub fn add_translation(&mut self, key: usize, translation: Option<String>) {
+    pub fn add_translation(
+        &mut self,
+        key: usize,
+        translation: Option<String>,
+        is_2nd_translation: bool,
+    ) {
         if let Some(item) = self.entries.get_mut(&key) {
-            item.translation = translation;
+            if is_2nd_translation {
+                item.translation2 = translation;
+            } else {
+                item.translation = translation;
+            }
         }
     }
 

@@ -97,10 +97,10 @@ impl ContentManager {
         }
 
         // Emit the live input event (only when changed)
-        let _ = self.content_tx.send(ContentEvent::UpdatedLiveInput(
-            self.id.to_owned(),
-            live_msg.clone(),
-        ));
+        let _ = self.content_tx.send(ContentEvent::UpdatedLiveInput {
+            source_id: self.id.to_owned(),
+            content: live_msg.clone(),
+        });
     }
 
     /// Listen for events from the ConversationManager.
@@ -130,11 +130,20 @@ impl ContentManager {
 
         // Update the translation
         while let Ok(event) = self.translation_rx.try_recv() {
-            if let TranslationEvent::ItemTranslated(key, translation) = event {
+            if let TranslationEvent::ItemTranslated {
+                key,
+                translation,
+                is_2nd_translation,
+            } = event
+            {
                 if let Some((latest_key, latest_entry)) = &self.latest {
                     if key == *latest_key {
                         let mut new_entry = latest_entry.to_owned();
-                        new_entry.translation = translation;
+                        if is_2nd_translation {
+                            new_entry.translation2 = translation;
+                        } else {
+                            new_entry.translation = translation;
+                        }
                         self.update_translation(Some((*latest_key, new_entry)));
                     }
                 }
@@ -155,17 +164,17 @@ impl ContentManager {
     /// Update the latest message buffer and send corresponding event
     fn update_latest(&mut self, latest: Option<KeyedConvoItem>) {
         self.latest = latest;
-        let _ = self.content_tx.send(ContentEvent::UpdatedLatest(
-            self.id.to_owned(),
-            self.latest.to_owned(),
-        ));
+        let _ = self.content_tx.send(ContentEvent::UpdatedLatest {
+            source_id: self.id.to_owned(),
+            convo_item: self.latest.to_owned(),
+        });
     }
 
     fn update_translation(&mut self, latest: Option<KeyedConvoItem>) {
         self.latest = latest;
-        let _ = self.content_tx.send(ContentEvent::UpdatedTranslation(
-            self.id.to_owned(),
-            self.latest.to_owned(),
-        ));
+        let _ = self.content_tx.send(ContentEvent::UpdatedTranslation {
+            source_id: self.id.to_owned(),
+            convo_item: self.latest.to_owned(),
+        });
     }
 }

@@ -86,4 +86,7 @@ pub struct SystemPromptConfig {
 #[derive(Debug, Deserialize)]
 pub struct TranslationConfig {
     pub enabled: bool,
+    pub enable_second_language: bool,
+    pub target_language: String,
+    pub second_target_language: String,
 }

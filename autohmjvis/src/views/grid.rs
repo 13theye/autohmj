@@ -295,8 +295,11 @@ impl TextGrid {
     fn process_events(&mut self, now: Instant) {
         while let Ok(event) = self.content_event_rx.try_recv() {
             match event {
-                ContentEvent::UpdatedLatest(id, latest) if id == self.id => {
-                    self.latest_convo_item = latest;
+                ContentEvent::UpdatedLatest {
+                    source_id,
+                    convo_item,
+                } if source_id == self.id => {
+                    self.latest_convo_item = convo_item;
                     self.latest_timestamp = Some(now);
 
                     self.update_content_chars();
@@ -319,12 +322,15 @@ impl TextGrid {
                         self.status_bar.set_timestamp(now);
                     }
                 }
-                ContentEvent::UpdatedLiveInput(id, message) if id == self.id => {
-                    self.update_with_live_message(&message, now);
+                ContentEvent::UpdatedLiveInput { source_id, content } if source_id == self.id => {
+                    self.update_with_live_message(&content, now);
                     self.status_bar.set_typing(now);
                 }
-                ContentEvent::UpdatedTranslation(id, latest) if id == self.id => {
-                    self.latest_convo_item = latest;
+                ContentEvent::UpdatedTranslation {
+                    source_id,
+                    convo_item,
+                } if source_id == self.id => {
+                    self.latest_convo_item = convo_item;
                     self.update_content_chars();
                 }
                 ContentEvent::GemmaRequested(id) if id == self.id => {
@@ -655,8 +661,16 @@ impl TextGrid {
                             self.params.cols.saturating_sub(self.filled_cols_count());
                         let rotate_sideways = unfilled_cols < 3;
 
+                        let translation_content = {
+                            if let Some(translation2) = &convo_item.translation2 {
+                                translation.to_owned() + "\n--\n" + translation2
+                            } else {
+                                translation.to_owned()
+                            }
+                        };
+
                         let translation_view = TranslationView {
-                            content: translation.to_owned(),
+                            content: translation_content,
                             rect: unfilled_rect,
                         };
 

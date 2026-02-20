@@ -15,7 +15,9 @@ use autohmjvis::{
     intro::IntroImage,
     models::{CommandMessage, HMJMessageWrapper, HumansTurn, LiveInputRegistry, Model},
     server::HMJServer,
-    services::{ConversationService, GemmaPersona, GemmaService, TranslationService},
+    services::{
+        ConversationService, GemmaPersona, GemmaService, TranslationService, TranslationServiceId,
+    },
     settings::{AuthConfig, GemmaConfig, GridConfig, OscSendConfig, Settings},
     views::{BackgroundManager, TextGrid, TextGridFonts, TextGridPosition},
 };
@@ -59,7 +61,19 @@ fn model(app: &App) -> Model {
 
     // Initialize services
     let convo = ConversationService::new(&event_bus);
-    let translate = TranslationService::new(&event_bus, config.translation.enabled);
+
+    let translate = TranslationService::new(
+        TranslationServiceId::First,
+        &event_bus,
+        config.translation.target_language,
+        config.translation.enabled,
+    );
+    let translate2 = TranslationService::new(
+        TranslationServiceId::Second,
+        &event_bus,
+        config.translation.second_target_language,
+        config.translation.enable_second_language,
+    );
     let ai = GemmaService::new(&gemma_config, &auth_config.google.api_key, &event_bus);
 
     // --- Load Font for Nannou Draw (Hangeul) ---
@@ -73,7 +87,7 @@ fn model(app: &App) -> Model {
         .unwrap_or_else(|_| panic!("Failed to load font at {:?}", font_path));
 
     // --- Load Font for Nannou Draw (Latin) ---
-    let font_path = assets.join("Lettera-Bold.ttf");
+    let font_path = assets.join("SometypeMono-v.ttf");
     let font_bytes = fs::read(&font_path)
         .unwrap_or_else(|_| panic!("Failed to read font file at {:?}", font_path));
     let latin_font = Font::from_bytes(font_bytes)
@@ -218,6 +232,7 @@ fn model(app: &App) -> Model {
 
         convo,
         translate,
+        translate2,
         ai,
         clock,
 
@@ -269,6 +284,7 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
 
     // Update services
     model.translate.update();
+    model.translate2.update();
     model.ai.update();
     model.server.update();
 
