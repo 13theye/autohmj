@@ -51,6 +51,11 @@ impl Sequencer {
             } else if ch.is_ascii_punctuation() {
                 self.osc_sender
                     .send_punctuation(self.id.as_str(), ch as i32);
+
+            // send letters as uppercase ascii
+            } else if ch.is_ascii_alphanumeric() {
+                self.osc_sender
+                    .send_alphanumeric(self.id.as_str(), ch.to_ascii_uppercase() as i32);
             }
         }
     }

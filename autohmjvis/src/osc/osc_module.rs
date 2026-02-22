@@ -41,6 +41,12 @@ impl OscSender {
         })
     }
 
+    /// - Sends choseong as 4352-4370
+    /// - Sends jungseong as 4449-4469
+    /// - Sends jeongseong as 4520-4546
+    /// - OR compatability range: 12593-12686
+    /// - Sentinel: -1 in jungseong and jeongsong if bare jamo
+    /// - 0 in jeongsong if no batchim
     pub fn send_seq(&self, id: &str, choseong: i32, jungseong: i32, jeongseong: i32) {
         let addr = "/hunmin/seq".to_string();
         let args = vec![
@@ -54,12 +60,24 @@ impl OscSender {
             .ok();
     }
 
+    /// - Sends punctuation as 33-47; 58-64; 91-96; 123-126
     pub fn send_punctuation(&self, id: &str, punctuation: i32) {
         let addr = "/hunmin/punc".to_string();
         let args = vec![
             osc::Type::String(id.to_string()),
             osc::Type::Int(punctuation),
         ];
+        self.sender
+            .send((addr, args), (self.target_addr.as_str(), self.target_port))
+            .ok();
+    }
+
+    /// - Sends ASCII digits (0-9) as 48-57
+    /// - ASCII uppercase letters (A-Z) as 65-90
+    /// - ASCII lowercase letters (a-z) as 97-122
+    pub fn send_alphanumeric(&self, id: &str, letter: i32) {
+        let addr = "/hunmin/alpha".to_string();
+        let args = vec![osc::Type::String(id.to_string()), osc::Type::Int(letter)];
         self.sender
             .send((addr, args), (self.target_addr.as_str(), self.target_port))
             .ok();
