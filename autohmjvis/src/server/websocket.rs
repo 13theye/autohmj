@@ -47,8 +47,9 @@ pub struct HMJServer {
     event_tx: broadcast::Sender<ServerEvent>,
     history_rx: broadcast::Receiver<ConvoEvent>, // subscribe to HistoryEvents
 
-    // Tokio runtime
-    pub runtime: Option<tokio::runtime::Runtime>,
+    // Tokio handle
+    rthandle: tokio::runtime::Handle,
+    server_started: bool,
 
     // Shutdown channel
     // Used to signal tasks to terminate
@@ -56,7 +57,7 @@ pub struct HMJServer {
 }
 
 impl HMJServer {
-    pub fn new(port: u16, events: &HMJEventBus) -> Self {
+    pub fn new(port: u16, events: &HMJEventBus, rthandle: tokio::runtime::Handle) -> Self {
         // Create comms channels
         let (message_tx, message_rx) = mpsc::channel(16);
         let (broadcast_tx, _) = broadcast::channel(16);
@@ -77,7 +78,8 @@ impl HMJServer {
             reg_rx,
             event_tx,
             history_rx,
-            runtime: None,
+            rthandle,
+            server_started: false,
             shutdown_tx,
         }
     }
@@ -113,13 +115,10 @@ impl HMJServer {
 
     /// Start the WebSocket server
     pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // If server runtime is already running, return Ok.
-        if self.runtime.is_some() {
+        // If server is already running, return Ok.
+        if self.server_started {
             return Ok(());
         }
-
-        // Create runtime
-        let runtime = tokio::runtime::Runtime::new()?;
 
         // Clone channels for server task
         let message_tx = self.message_tx.clone();
@@ -130,7 +129,7 @@ impl HMJServer {
         let reg_tx = self.reg_tx.clone();
 
         // Start server task
-        runtime.spawn(async move {
+        self.rthandle.spawn(async move {
 
             // Create TCP listener
             let addr = format!("0.0.0.0:{}", port);
@@ -175,7 +174,7 @@ impl HMJServer {
             }
         });
 
-        self.runtime = Some(runtime);
+        self.server_started = true;
 
         Ok(())
     }
@@ -226,18 +225,6 @@ impl HMJServer {
 
         // Signal all tasks to terminate
         let _ = self.shutdown_tx.send(());
-
-        // Shut down server runtime from a separate thread
-
-        if let Some(runtime) = self.runtime.take() {
-            std::thread::spawn(move || {
-                println!(".....Shutting down HMJServer runtime in separate thread...");
-                runtime.shutdown_timeout(std::time::Duration::from_secs(1));
-            })
-            .join()
-            .ok();
-            println!(".....HMJ Server runtime shutdown successfully")
-        }
 
         println!("...HMJServer shutdown complete");
     }

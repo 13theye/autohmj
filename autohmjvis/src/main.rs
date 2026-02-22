@@ -50,8 +50,12 @@ fn model(app: &App) -> Model {
     // Subscribe to Gemma events
     let gemma_rx = event_bus.gemma.subscribe();
 
+    // Create shared Tokio runtime and distribute handles to services
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to create shared Tokio runtime");
+    let rthandle = runtime.handle().clone();
+
     // Initialize & start HMJServer
-    let mut server = HMJServer::new(config.server.port, &event_bus);
+    let mut server = HMJServer::new(config.server.port, &event_bus, rthandle.clone());
     server.start().expect("Failed to start HMJServer");
 
     // Initialize live input registry
@@ -66,8 +70,14 @@ fn model(app: &App) -> Model {
         config.translation.enabled,
         config.translation.second_target_language,
         config.translation.enable_second_language,
+        rthandle.clone(),
     );
-    let ai = GemmaService::new(&gemma_config, &auth_config.google.api_key, &event_bus);
+    let ai = GemmaService::new(
+        &gemma_config,
+        &auth_config.google.api_key,
+        &event_bus,
+        rthandle,
+    );
 
     // --- Load Font for Nannou Draw (Hangeul) ---
     // Assumes "assets/gulim.ttf" exists relative to the executable
@@ -258,6 +268,7 @@ fn model(app: &App) -> Model {
 
         show_fps: false,
         show_debug: false,
+        runtime,
     }
 }
 

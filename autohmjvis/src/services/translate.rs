@@ -38,8 +38,10 @@ pub struct TranslationService {
     pub second_language: TranslationLanguage,
     pub second_enabled: bool,
 
+    // Tokio runtime handle
+    rthandle: tokio::runtime::Handle,
+
     // Single shared async channel — TranslationServiceId in payload routes results
-    pub runtime: Option<tokio::runtime::Runtime>,
     translation_tx: mpsc::Sender<(usize, Option<String>, TranslationLanguageSlot)>,
     translation_rx: mpsc::Receiver<(usize, Option<String>, TranslationLanguageSlot)>,
 
@@ -58,15 +60,13 @@ impl TranslationService {
         first_enabled: bool,
         second_lang_code: String,
         second_enabled: bool,
+        rthandle: tokio::runtime::Handle,
     ) -> Self {
         let event_tx = events.translation.clone();
         let history_rx = events.convo.subscribe();
 
         let (translation_tx, translation_rx) =
             mpsc::channel::<(usize, Option<String>, TranslationLanguageSlot)>(16);
-
-        let translation_runtime =
-            tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime for translation");
 
         let (shutdown_tx, _) = broadcast::channel(1);
 
@@ -84,7 +84,7 @@ impl TranslationService {
             first_enabled,
             second_language,
             second_enabled,
-            runtime: Some(translation_runtime),
+            rthandle,
             translation_tx,
             translation_rx,
             event_tx,
@@ -136,31 +136,29 @@ impl TranslationService {
         translation_type: TranslationLanguage,
         slot: TranslationLanguageSlot,
     ) {
-        if let Some(runtime) = &self.runtime {
-            let tx = self.translation_tx.clone();
-            let mut shutdown_rx = self.shutdown_tx.subscribe();
-            runtime.spawn(async move {
-                let shutdown = async {
-                    let _ = shutdown_rx.recv().await;
-                };
+        let tx = self.translation_tx.clone();
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
+        self.rthandle.spawn(async move {
+            let shutdown = async {
+                let _ = shutdown_rx.recv().await;
+            };
 
-                let task = async {
-                    let (translation, source) = translate
-                        .get_translation(&msg, "auto", translation_type.code(), slot)
-                        .await;
-                    let _ = tx.send((key, translation, source)).await;
-                };
+            let task = async {
+                let (translation, source) = translate
+                    .get_translation(&msg, "auto", translation_type.code(), slot)
+                    .await;
+                let _ = tx.send((key, translation, source)).await;
+            };
 
-                tokio::select! {
-                    _ = shutdown => {
-                        println!(".....Translation task received shutdown signal");
-                    }
-                    _ = task => {
-                        println!("Translation task completed normally")
-                    }
+            tokio::select! {
+                _ = shutdown => {
+                    println!(".....Translation task received shutdown signal");
                 }
-            });
-        }
+                _ = task => {
+                    println!("Translation task completed normally")
+                }
+            }
+        });
     }
 
     // Receive completed translations and emit TranslationEvent::ItemTranslated.
@@ -191,18 +189,6 @@ impl TranslationService {
 
         // Signal all tasks to terminate
         let _ = self.shutdown_tx.send(());
-
-        // Take ownership of the runtime
-        if let Some(runtime) = self.runtime.take() {
-            // Shut down runtime from a separate thread to avoid blocking
-            std::thread::spawn(move || {
-                println!(".....Shutting down Translation runtime in separate thread...");
-                runtime.shutdown_timeout(std::time::Duration::from_secs(1));
-            })
-            .join()
-            .ok();
-            println!(".....Translation runtime shutdown successfully");
-        }
     }
 }
 

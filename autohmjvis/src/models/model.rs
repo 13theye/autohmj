@@ -70,6 +70,9 @@ pub struct Model {
 
     // When true, displays FPS
     pub show_fps: bool,
+
+    // Shared async runtime — must be last so it drops after all services
+    pub runtime: tokio::runtime::Runtime,
 }
 
 // ************************ Graceful Shutdown  *************************************

@@ -28,8 +28,8 @@ pub struct GemmaService {
     // System prompt for all Gemma instances
     system_prompt: String,
 
-    // Tokio runtime for async tasks
-    runtime: Option<tokio::runtime::Runtime>,
+    // Tokio handle for async tasks
+    rthandle: tokio::runtime::Handle,
 
     // Reqwest client
     client: Client,
@@ -45,10 +45,13 @@ pub struct GemmaService {
 }
 
 impl GemmaService {
-    pub fn new(config: &GemmaConfig, api_key: &str, events: &HMJEventBus) -> Self {
+    pub fn new(
+        config: &GemmaConfig,
+        api_key: &str,
+        events: &HMJEventBus,
+        rthandle: tokio::runtime::Handle,
+    ) -> Self {
         let system_prompt = config.system.prompt.to_owned();
-        let runtime =
-            tokio::runtime::Runtime::new().expect("Failed to start Tokio runtime for GemmaManager");
         let (shutdown_tx, _) = broadcast::channel(1);
         let (instances, moderator_instance) = make_instances_from_config(config);
         let moderator = GemmaModerator::from_gemma_instance(moderator_instance);
@@ -58,7 +61,7 @@ impl GemmaService {
             instances,
             moderator,
             system_prompt,
-            runtime: Some(runtime),
+            rthandle,
             client: Client::new(),
             api_key: api_key.to_owned(),
             event_tx,
@@ -108,49 +111,47 @@ impl GemmaService {
         let model = gemma_instance.model.clone();
 
         // Spawn a new async task to send the request to the Gemma API.
-        if let Some(runtime) = &self.runtime {
-            let tx = gemma_instance.tx.clone();
-            let mut shutdown_rx = self.shutdown_tx.subscribe();
+        let tx = gemma_instance.tx.clone();
+        let mut shutdown_rx = self.shutdown_tx.subscribe();
 
-            // Emit a notification that an AI request has been sent
-            let _ = self
-                .event_tx
-                .send(GemmaEvent::GemmaRequested(gemma_instance.id.to_owned()));
+        // Emit a notification that an AI request has been sent
+        let _ = self
+            .event_tx
+            .send(GemmaEvent::GemmaRequested(gemma_instance.id.to_owned()));
 
-            runtime.spawn(async move {
-                println!("Gemma async task created");
+        self.rthandle.spawn(async move {
+            println!("Gemma async task created");
 
-                let shutdown = async {
-                    let _ = shutdown_rx.recv().await;
-                };
+            let shutdown = async {
+                let _ = shutdown_rx.recv().await;
+            };
 
-                let task = async {
-                    match generate_response(contents, model, client, api_key).await {
-                        Ok(response) => {
-                            println!("Received successful response of length {}", response.len());
-                            // Pass message to Instance
-                            let _ = tx.send(Some(response)).await;
-                        }
-                        Err(e) => {
-                            eprintln!("Gemma API error: {}", e);
-                            if let Some(source) = e.source() {
-                                eprintln!("Error source: {}", source);
-                            }
-                            let _ = tx.send(None).await;
-                        }
+            let task = async {
+                match generate_response(contents, model, client, api_key).await {
+                    Ok(response) => {
+                        println!("Received successful response of length {}", response.len());
+                        // Pass message to Instance
+                        let _ = tx.send(Some(response)).await;
                     }
-                };
-
-                tokio::select! {
-                    _ = shutdown => {
-                        println!("...Gemma task received shutdown signal");
-                    }
-                    _ = task => {
-                        println!("Gemma task completed normally")
+                    Err(e) => {
+                        eprintln!("Gemma API error: {}", e);
+                        if let Some(source) = e.source() {
+                            eprintln!("Error source: {}", source);
+                        }
+                        let _ = tx.send(None).await;
                     }
                 }
-            });
-        }
+            };
+
+            tokio::select! {
+                _ = shutdown => {
+                    println!("...Gemma task received shutdown signal");
+                }
+                _ = task => {
+                    println!("Gemma task completed normally")
+                }
+            }
+        });
 
         Ok(())
     }
@@ -217,18 +218,6 @@ impl GemmaService {
 
         // Signal all tasks to terminate
         let _ = self.shutdown_tx.send(());
-
-        // Take ownership of the runtime
-        if let Some(runtime) = self.runtime.take() {
-            // Shut down runtime from a separate thread to avoid blocking
-            std::thread::spawn(move || {
-                println!(".....Shutting down Gemma runtime in separate thread...");
-                runtime.shutdown_timeout(std::time::Duration::from_secs(1));
-            })
-            .join()
-            .ok();
-            println!(".....Gemma runtime shutdown successfully");
-        }
     }
 }
 
