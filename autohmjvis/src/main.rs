@@ -340,8 +340,7 @@ fn performer_view(app: &App, model: &Model, frame: Frame) {
         model.fps.draw(&model.performer_draw);
     }
 
-    // Draw current cursor position
-    //draw_hud(app, model);
+    draw_humans_turn_indicator(&model.performer_draw, model.humans_turn, frame.rect());
 
     // Then draw UI over it
     let _ = model.performer_draw.to_frame(app, &frame);
@@ -636,108 +635,24 @@ fn draw_debug(app: &App, model: &Model) {
 // Draws the performer view HUD.
 // A grid showing the squares the human grid to help with spacing, and an indicator for the human's turn.
 // Also the current cursor position.
-/*
-fn draw_hud(app: &App, model: &Model) {
-    let Some(grid) = model.grids.iter().find(|grid| grid.id == "Human") else {
-        println!("No human grid found");
-        return;
-    };
 
-    let rendering = model.rendering.borrow();
-    let draw = &model.performer_draw;
-    let performer_rect = app.window(model.performer_window_id).unwrap().rect();
-
-    // scale grid dimensions to match window size
-    let scale_x = performer_rect.w() / rendering.scene_texture.size()[0] as f32;
-    let scale_y = performer_rect.h() / rendering.scene_texture.size()[1] as f32;
-
-    let origin_x = grid.origin_x * scale_x;
-    let message_y = grid.message_y * scale_y;
-    let rows = grid.rows;
-    let cols = grid.cols;
-
-    let cell_width = grid.cell_width * scale_x;
-    let cell_height = grid.cell_height * scale_y;
-
-    let grid_color = rgba(0.0, 0.3, 0.0, 1.0);
-
-    let next_speaker_indicator_color = if model.humans_turn == HumansTurn::True {
+fn draw_humans_turn_indicator(draw: &Draw, humans_turn: HumansTurn, screen_rect: Rect) {
+    let next_speaker_indicator_color = if humans_turn == HumansTurn::True {
         rgba(0.0, 0.83, 0.0, 1.0)
-    } else if model.humans_turn == HumansTurn::False {
+    } else if humans_turn == HumansTurn::False {
         rgba(0.72, 0.0, 0.0, 1.0)
     } else {
         rgba(0.8, 0.8, 0.0, 1.0)
     };
 
+    let indicator_y = screen_rect.top() - 30.0;
+
     // Draw next speaker indicator
     draw.ellipse()
-        .x_y(0.0, message_y + 80.0)
+        .x_y(0.0, indicator_y)
         .w_h(20.0, 20.0)
         .color(next_speaker_indicator_color);
-
-    for row in 0..=rows {
-        draw.line()
-            .points(
-                pt2(
-                    origin_x - cell_width / 2.0,
-                    (message_y + cell_height / 2.0) - row as f32 * cell_height,
-                ),
-                pt2(
-                    (origin_x - cell_width / 2.0) + cols as f32 * cell_width,
-                    (message_y + cell_height / 2.0) - row as f32 * cell_height,
-                ),
-            )
-            .color(grid_color)
-            .stroke_weight(1.0);
-    }
-
-    for col in 0..=cols {
-        draw.line()
-            .points(
-                pt2(
-                    (origin_x - cell_width / 2.0) + col as f32 * cell_width,
-                    message_y + cell_height / 2.0,
-                ),
-                pt2(
-                    (origin_x - cell_width / 2.0) + col as f32 * cell_width,
-                    (message_y + cell_height / 2.0) - rows as f32 * cell_height,
-                ),
-            )
-            .color(grid_color)
-            .stroke_weight(1.0);
-    }
-
-    // scale & draw the cursor position
-    let Some(cursor_position) = model.cursor_positions.get(&grid.id) else {
-        return;
-    };
-
-    let cursor_grid_pos = (cursor_position / grid.cols, cursor_position % grid.cols);
-    let cursor_pos = grid.place_char_at(cursor_grid_pos.0, cursor_grid_pos.1);
-
-    let cell_width = grid.cell_width * scale_x;
-    let cell_height = grid.cell_height * scale_y;
-
-    let cursor_length = cell_width - 2.0;
-    let scaled_pos = cursor_pos * pt2(scale_x, scale_y);
-
-    // Use these for a horizontal cursor underneath
-    let start_point = pt2(
-        scaled_pos.x - cursor_length / 2.0,
-        scaled_pos.y - cell_height / 2.0,
-    );
-    let end_point = pt2(
-        scaled_pos.x + cursor_length / 2.0,
-        scaled_pos.y - cell_height / 2.0,
-    );
-
-    // Draw a horizontal cursor line
-    draw.line()
-        .points(start_point, end_point)
-        .color(rgba(1.0, 1.0, 1.0, 1.0))
-        .stroke_weight(2.0); // Made thicker for visibility
 }
-*/
 
 // ************************ Main window input  *************************************
 
