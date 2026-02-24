@@ -5,6 +5,7 @@
 use nannou_osc as osc;
 use std::error::Error;
 
+use super::alphabetic::to_hangeul_components;
 use crate::settings::OscSendConfig;
 
 #[derive(Debug)]
@@ -81,6 +82,16 @@ impl OscSender {
         self.sender
             .send((addr, args), (self.target_addr.as_str(), self.target_port))
             .ok();
+    }
+
+    /// - Converts a char to uppercase, then looks up the choseong, jungseong, and jeongseong conversion
+    /// - Calls `send_seq` to send to same destination as hangeul
+    pub fn send_alphanumeric_as_hangeul(&self, id: &str, letter: char) {
+        let Some((choseong, jungseong, jeongseong)) = to_hangeul_components(letter) else {
+            return;
+        };
+
+        self.send_seq(id, choseong, jungseong, jeongseong);
     }
 
     pub fn send_num_letters(&self, id: &str, num_letters: i32) {

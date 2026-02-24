@@ -55,7 +55,7 @@ impl Sequencer {
             // send letters as uppercase ascii
             } else if ch.is_ascii_alphanumeric() {
                 self.osc_sender
-                    .send_alphanumeric(self.id.as_str(), ch.to_ascii_uppercase() as i32);
+                    .send_alphanumeric_as_hangeul(self.id.as_str(), ch);
             }
         }
     }
