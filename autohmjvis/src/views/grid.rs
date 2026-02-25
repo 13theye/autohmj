@@ -664,7 +664,7 @@ impl TextGrid {
                         let translation_view = TranslationView {
                             content1: translation.to_owned(),
                             content2: convo_item.translation2.to_owned(),
-                            rect: unfilled_rect,
+                            rect: unfilled_rect.pad(10.0),
                         };
 
                         translation_view.draw(

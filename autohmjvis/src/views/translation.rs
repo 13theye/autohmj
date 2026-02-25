@@ -6,7 +6,7 @@
 use crate::views::TextGridFonts;
 
 use nannou::prelude::*;
-use nannou::text::Layout;
+use nannou::text::{self, Font, Layout};
 
 pub struct TranslationView {
     // First language content
@@ -19,6 +19,23 @@ pub struct TranslationView {
 impl TranslationView {
     pub fn set_rect(&mut self, rect: Rect) {
         self.rect = rect;
+    }
+
+    /// Measures how tall `content` would be when rendered with `layout` and `font`
+    /// at the width of `self.rect`, with no vertical clipping.
+    fn measure_content_height(&self, content: &str, layout: &Layout, font: Font) -> f32 {
+        let probe_rect = Rect::from_xy_wh(self.rect.xy(), vec2(self.rect.w(), 10_000.0));
+        text::text(content)
+            .font(font)
+            .layout(layout)
+            .build(probe_rect)
+            .bounding_rect()
+            .h()
+    }
+
+    /// Returns `true` if `content` would overflow the vertical bounds of `self.rect`.
+    fn exceeds_y_bounds(&self, content: &str, layout: &Layout, font: Font) -> bool {
+        self.measure_content_height(content, layout, font) > self.rect.h()
     }
 
     pub fn draw(
@@ -53,8 +70,15 @@ impl TranslationView {
                 .font(fonts.latin.clone())
                 .color(color);
         } else {
-            // Draw normally
-            draw.text(&word_per_line_content)
+            // Prefer word-per-line layout; fall back to space-wrapped if it overflows.
+            let display_content =
+                if self.exceeds_y_bounds(&word_per_line_content, layout, fonts.latin.clone()) {
+                    &content
+                } else {
+                    &word_per_line_content
+                };
+
+            draw.text(display_content)
                 .xy(self.rect.xy())
                 .wh(self.rect.wh())
                 .layout(layout)
