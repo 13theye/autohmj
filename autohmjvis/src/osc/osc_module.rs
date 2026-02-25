@@ -91,7 +91,16 @@ impl OscSender {
             return;
         };
 
-        self.send_seq(id, choseong, jungseong, jeongseong);
+        // Offsets Jin's range back into Hangeul compatibility ASCII numbers
+        // so it works with his M4L patch.
+        let magic_number: i32 = 12592;
+
+        self.send_seq(
+            id,
+            choseong + magic_number,
+            jungseong + magic_number,
+            jeongseong + magic_number,
+        );
     }
 
     pub fn send_num_letters(&self, id: &str, num_letters: i32) {

@@ -661,16 +661,9 @@ impl TextGrid {
                             self.params.cols.saturating_sub(self.filled_cols_count());
                         let rotate_sideways = unfilled_cols < 3;
 
-                        let translation_content = {
-                            if let Some(translation2) = &convo_item.translation2 {
-                                translation.to_owned() + "\n--\n" + translation2
-                            } else {
-                                translation.to_owned()
-                            }
-                        };
-
                         let translation_view = TranslationView {
-                            content: translation_content,
+                            content1: translation.to_owned(),
+                            content2: convo_item.translation2.to_owned(),
                             rect: unfilled_rect,
                         };
 
