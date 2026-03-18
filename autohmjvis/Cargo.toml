@@ -5,6 +5,7 @@ version = "1.1.0"
 edition = "2021"
 
 [dependencies]
+async-openai = { version = "0.31", features = ["byot", "responses"]}
 autohmjcommon = { path = "../autohmjcommon" }
 chrono = "0.4"
 config = "0.15"
@@ -18,6 +19,7 @@ nannou_osc = "0.19"
 nnpipe = { path = "../../13thlib/nnpipe" }
 prat = { path = "../../13thlib/prat" }
 reqwest = "0.12"
+schemars = "1.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1", features = ["full"] }

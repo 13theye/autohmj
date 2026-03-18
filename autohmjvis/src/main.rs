@@ -370,8 +370,13 @@ fn update_control_panel(model: &mut Model, update: Update) {
                                     human_color: HumanColorConfig { r, g, b, a },
                                 };
                                 match UiStateConfig::save(&config) {
-                                    Ok(()) => model.control_panel.save_status = Some("Saved".to_string()),
-                                    Err(e) => model.control_panel.save_status = Some(format!("Error: {}", e)),
+                                    Ok(()) => {
+                                        model.control_panel.save_status = Some("Saved".to_string())
+                                    }
+                                    Err(e) => {
+                                        model.control_panel.save_status =
+                                            Some(format!("Error: {}", e))
+                                    }
                                 }
                             }
                             ui.add_space(15.0);
@@ -379,7 +384,8 @@ fn update_control_panel(model: &mut Model, update: Update) {
                                 let loaded = UiStateConfig::load();
                                 let c = loaded.human_color;
                                 model.control_panel.human_color = [c.r, c.g, c.b, c.a];
-                                model.control_panel.save_status = Some("Reverted changes.".to_string());
+                                model.control_panel.save_status =
+                                    Some("Reverted changes.".to_string());
                             }
                         });
                         ui.label(model.control_panel.save_status.as_deref().unwrap_or(""));

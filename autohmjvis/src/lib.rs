@@ -5,6 +5,7 @@ pub mod events;
 pub mod fps;
 pub mod intro;
 pub mod models;
+pub mod openai;
 pub mod osc;
 pub mod server;
 pub mod services;
