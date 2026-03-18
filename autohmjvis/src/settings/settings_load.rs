@@ -9,6 +9,7 @@ use super::settings_types::*;
 use config::{Config, ConfigError, File};
 use serde::Deserialize;
 use std::env;
+use toml;
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {
@@ -92,6 +93,38 @@ impl AuthConfig {
 
         // You can deserialize (and thus freeze) the entire configuration as
         s.try_deserialize()
+    }
+}
+
+pub struct UiStateConfig;
+
+impl UiStateConfig {
+    fn support_path() -> Option<std::path::PathBuf> {
+        let exe_path = env::current_exe().ok()?;
+        let exe_dir = exe_path.parent()?;
+        Some(exe_dir.join("autohmjvis-support").join("ui_state.toml"))
+    }
+
+    pub fn load() -> UiStateFileConfig {
+        let path = match Self::support_path() {
+            Some(p) => p,
+            None => return UiStateFileConfig::default(),
+        };
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => return UiStateFileConfig::default(),
+        };
+        toml::from_str(&content).unwrap_or_default()
+    }
+
+    pub fn save(config: &UiStateFileConfig) -> Result<(), String> {
+        let path = Self::support_path()
+            .ok_or_else(|| "Could not determine save path".to_string())?;
+        let content = toml::to_string(config)
+            .map_err(|e| format!("Serialize error: {}", e))?;
+        std::fs::write(&path, content)
+            .map_err(|e| format!("Write error: {}", e))?;
+        Ok(())
     }
 }
 

@@ -9,4 +9,5 @@ pub mod osc;
 pub mod server;
 pub mod services;
 pub mod settings;
+pub mod ui;
 pub mod views;

@@ -16,9 +16,14 @@ use autohmjvis::{
     models::{CommandMessage, HMJMessageWrapper, HumansTurn, LiveInputRegistry, Model},
     server::HMJServer,
     services::{ConversationService, GemmaPersona, GemmaService, TranslationService},
-    settings::{AuthConfig, GemmaConfig, GridConfig, OscSendConfig, Settings},
+    settings::{
+        AuthConfig, GemmaConfig, GridConfig, HumanColorConfig, OscSendConfig, Settings,
+        UiStateConfig, UiStateFileConfig,
+    },
+    ui::control_panel::ControlPanel,
     views::{BackgroundManager, TextGrid, TextGridFonts, TextGridPosition},
 };
+use nannou_egui::egui;
 
 //const HUMAN_ID: &str = "Human";
 
@@ -129,6 +134,7 @@ fn model(app: &App) -> Model {
         )
         .msaa_samples(1)
         .view(performer_view)
+        .raw_event(raw_window_event)
         .key_pressed(key_pressed)
         .build()
         .unwrap();
@@ -229,6 +235,9 @@ fn model(app: &App) -> Model {
     let mut intro_image = IntroImage::new(&config.paths.intro_image);
     intro_image.load(app);
 
+    // Create the control panel for the performer window
+    let control_panel = ControlPanel::new(&performer_window);
+
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
         intro_image,
@@ -268,6 +277,7 @@ fn model(app: &App) -> Model {
 
         show_fps: false,
         show_debug: false,
+        control_panel,
         runtime,
     }
 }
@@ -276,8 +286,155 @@ fn main() {
     nannou::app(model).update(update).run();
 }
 
+fn raw_window_event(_app: &App, model: &mut Model, event: &nannou::winit::event::WindowEvent) {
+    model.control_panel.egui.handle_raw_event(event);
+}
+
+fn update_control_panel(model: &mut Model, update: Update) {
+    model
+        .control_panel
+        .egui
+        .set_elapsed_time(update.since_start);
+    let ctx = model.control_panel.egui.begin_frame();
+
+    let style = (*ctx.style()).clone();
+    ctx.set_style(adjust_style_from(style));
+
+    if model.control_panel.show {
+        egui::TopBottomPanel::bottom("control_panel")
+            .frame(egui::Frame {
+                fill: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 0),
+                stroke: egui::Stroke::new(0.0, egui::Color32::from_rgb(10, 10, 10)),
+                inner_margin: egui::style::Margin::symmetric(10.0, 10.0),
+                outer_margin: egui::style::Margin::same(0.0),
+                rounding: egui::Rounding::same(1.0),
+                shadow: egui::epaint::Shadow::NONE,
+            })
+            .show(&ctx, |ui| {
+                let panel_height = ui.available_height();
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_min_height(panel_height);
+                        ui.heading("Control Panel");
+                    });
+                    ui.separator();
+                    ui.vertical(|ui| {
+                        ui.label("Grid Color");
+                        ui.add_space(4.0);
+                        ui.label("Human");
+                        let r_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.human_color[0],
+                                    0.0..=1.0,
+                                )
+                                .text("R"),
+                            )
+                            .changed();
+                        let g_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.human_color[1],
+                                    0.0..=1.0,
+                                )
+                                .text("G"),
+                            )
+                            .changed();
+                        let b_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.human_color[2],
+                                    0.0..=1.0,
+                                )
+                                .text("B"),
+                            )
+                            .changed();
+                        let a_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.human_color[3],
+                                    0.0..=1.0,
+                                )
+                                .text("A"),
+                            )
+                            .changed();
+                        if r_changed || g_changed || b_changed || a_changed {
+                            model.control_panel.save_status =
+                                Some("Unsaved changes...".to_string());
+                        }
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("Save").clicked() {
+                                let [r, g, b, a] = model.control_panel.human_color;
+                                let config = UiStateFileConfig {
+                                    human_color: HumanColorConfig { r, g, b, a },
+                                };
+                                match UiStateConfig::save(&config) {
+                                    Ok(()) => model.control_panel.save_status = Some("Saved".to_string()),
+                                    Err(e) => model.control_panel.save_status = Some(format!("Error: {}", e)),
+                                }
+                            }
+                            ui.add_space(15.0);
+                            if ui.button("Revert").clicked() {
+                                let loaded = UiStateConfig::load();
+                                let c = loaded.human_color;
+                                model.control_panel.human_color = [c.r, c.g, c.b, c.a];
+                                model.control_panel.save_status = Some("Reverted changes.".to_string());
+                            }
+                        });
+                        ui.label(model.control_panel.save_status.as_deref().unwrap_or(""));
+                    });
+                });
+            });
+    }
+
+    // Always apply color to human grid (even when panel is hidden)
+    let [r, g, b, a] = model.control_panel.human_color;
+    if let Some(grid) = model.grids.iter_mut().find(|g| g.id == "Human") {
+        grid.text_style.cell_bgcolor = rgba(r, g, b, a);
+    }
+}
+
+fn adjust_style_from(style: egui::Style) -> egui::Style {
+    let mut style = style;
+    style.text_styles = [
+        (
+            egui::TextStyle::Heading,
+            egui::FontId::new(15.0, egui::FontFamily::Monospace),
+        ),
+        (
+            egui::TextStyle::Body,
+            egui::FontId::new(13.0, egui::FontFamily::Monospace),
+        ),
+        (
+            egui::TextStyle::Button,
+            egui::FontId::new(13.0, egui::FontFamily::Monospace),
+        ),
+        (
+            egui::TextStyle::Small,
+            egui::FontId::new(11.0, egui::FontFamily::Monospace),
+        ),
+    ]
+    .into_iter()
+    .collect();
+
+    style.spacing.item_spacing = egui::vec2(10.0, 5.0);
+    style.spacing.button_padding = egui::vec2(8.0, 2.0);
+    style.spacing.slider_width = 150.0;
+
+    let mut visuals = style.visuals.clone();
+    visuals.widgets.active.bg_fill = egui::Color32::from_rgb(120, 120, 120);
+    visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(70, 70, 70);
+    visuals.window_fill = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 0);
+    visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(10, 10, 10));
+
+    style.visuals = visuals;
+
+    style
+}
+
 // The main update loop, runs at 60Hz per Nannou
-fn update(_app: &App, model: &mut Model, _update: Update) {
+fn update(_app: &App, model: &mut Model, update: Update) {
     model.update_time = std::time::Instant::now();
 
     // FPS update
@@ -303,6 +460,9 @@ fn update(_app: &App, model: &mut Model, _update: Update) {
     model.content.iter_mut().for_each(|content| {
         content.update();
     });
+
+    // Update control panel (must be before grid updates so cell_bgcolor is fresh)
+    update_control_panel(model, update);
 
     // Update Grid View modules
     model.grids.iter_mut().for_each(|grid| {
@@ -344,6 +504,7 @@ fn performer_view(app: &App, model: &Model, frame: Frame) {
 
     // Then draw UI over it
     let _ = model.performer_draw.to_frame(app, &frame);
+    model.control_panel.egui.draw_to_frame(&frame).unwrap();
 }
 
 // The audience view is the main window that displays the performance, that the audience sees.
@@ -676,6 +837,9 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
         }
         Key::I => {
             model.intro_image.toggle_visible();
+        }
+        Key::M => {
+            model.control_panel.show = !model.control_panel.show;
         }
         Key::Escape => {
             app.quit();

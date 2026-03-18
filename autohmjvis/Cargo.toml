@@ -13,6 +13,7 @@ futures-util = "0.3"
 hangeul = "0.4.0"
 rustkorean = "1.1"
 nannou = "0.19"
+nannou_egui = "0.19"
 nannou_osc = "0.19"
 nnpipe = { path = "../../13thlib/nnpipe" }
 prat = { path = "../../13thlib/prat" }

@@ -2,7 +2,7 @@
 //
 // Config types for the app
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 pub struct GoogleConfig {
@@ -81,6 +81,30 @@ pub struct TempoConfig {
 #[derive(Debug, Deserialize)]
 pub struct SystemPromptConfig {
     pub prompt: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct HumanColorConfig {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+impl Default for HumanColorConfig {
+    fn default() -> Self {
+        Self {
+            r: 0.486,
+            g: 0.706,
+            b: 0.702,
+            a: 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct UiStateFileConfig {
+    pub human_color: HumanColorConfig,
 }
 
 #[derive(Debug, Deserialize)]

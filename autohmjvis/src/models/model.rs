@@ -10,6 +10,7 @@ use crate::{
     models::LiveInputRegistry,
     server::HMJServer,
     services::{ConversationService, GemmaService, TranslationService},
+    ui::control_panel::ControlPanel,
     views::{BackgroundManager, TextGrid, TextGridFonts},
 };
 use nnpipe::*;
@@ -70,6 +71,9 @@ pub struct Model {
 
     // When true, displays FPS
     pub show_fps: bool,
+
+    // Control panel (toggled with M key)
+    pub control_panel: ControlPanel,
 
     // Shared async runtime — must be last so it drops after all services
     pub runtime: tokio::runtime::Runtime,
