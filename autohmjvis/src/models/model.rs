@@ -4,12 +4,12 @@
 
 use crate::{
     content::ContentManager,
-    events::GemmaEvent,
+    events::AIEvent,
     fps::FpsManager,
     intro::IntroImage,
     models::LiveInputRegistry,
     server::HMJServer,
-    services::{ConversationService, GemmaService, TranslationService},
+    services::{AIService, ConversationService, TranslationService},
     ui::control_panel::ControlPanel,
     views::{BackgroundManager, TextGrid, TextGridFonts},
 };
@@ -27,11 +27,11 @@ pub struct Model {
     // Services
     pub convo: ConversationService,    // handles the conversation
     pub translate: TranslationService, // handles translation for both language slots
-    pub ai: GemmaService,              // handles the AI
+    pub ai: AIService,                 // handles the AI
     pub clock: ClockService,            // handles the clock
 
     // Conversation channel (for moderator)
-    pub gemma_rx: broadcast::Receiver<GemmaEvent>, // the channel for Gemma events
+    pub gemma_rx: broadcast::Receiver<AIEvent>,    // the channel for AI events
     pub humans_turn: HumansTurn, // true if the moderator decides human should speak next
 
     // Content and views

@@ -10,7 +10,7 @@ fn main() {
     let config_path = Path::new("config.toml");
     let assets = Path::new("assets");
     let auth = Path::new("auth");
-    let gemma = Path::new("gemma");
+    let ai = Path::new("ai");
 
     let top_path = Path::new(&out_dir)
         .parent()
@@ -29,8 +29,8 @@ fn main() {
     let mut auth_path_string = support_path_string.clone();
     auth_path_string.push_str("/auth");
 
-    let mut gemma_path_string = support_path_string.clone();
-    gemma_path_string.push_str("/gemma");
+    let mut ai_path_string = support_path_string.clone();
+    ai_path_string.push_str("/ai");
 
     // Create support subdirectory for this project
     fs::create_dir_all(&support_path_string).unwrap();
@@ -47,9 +47,9 @@ fn main() {
     let new_auth_path = Path::new(&auth_path_string);
     copy_dir_all(auth, new_auth_path).unwrap();
 
-    // Copy gemma
-    let new_gemma_path = Path::new(&gemma_path_string);
-    copy_dir_all(gemma, new_gemma_path).unwrap();
+    // Copy ai
+    let new_ai_path = Path::new(&ai_path_string);
+    copy_dir_all(ai, new_ai_path).unwrap();
 }
 
 fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {

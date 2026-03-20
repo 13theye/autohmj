@@ -1,8 +1,8 @@
+pub mod ai;
+pub use ai::{AIEvent, AIPersona, AIResponse, AIService};
+
 pub mod convo;
 pub use convo::{ConversationService, ConvoEvent};
-
-pub mod gemma;
-pub use gemma::{GemmaEvent, GemmaPersona, GemmaResponse, GemmaService};
 
 pub mod sequencer;
 pub use sequencer::Sequencer;

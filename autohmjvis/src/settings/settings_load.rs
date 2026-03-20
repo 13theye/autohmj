@@ -30,7 +30,7 @@ pub struct AuthConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct GemmaConfig {
+pub struct AIConfig {
     pub system: SystemPromptConfig,
     pub persona_1: PersonaConfig,
     pub persona_2: PersonaConfig,
@@ -118,17 +118,57 @@ impl UiStateConfig {
     }
 
     pub fn save(config: &UiStateFileConfig) -> Result<(), String> {
-        let path = Self::support_path()
-            .ok_or_else(|| "Could not determine save path".to_string())?;
-        let content = toml::to_string(config)
-            .map_err(|e| format!("Serialize error: {}", e))?;
-        std::fs::write(&path, content)
-            .map_err(|e| format!("Write error: {}", e))?;
+        let path =
+            Self::support_path().ok_or_else(|| "Could not determine save path".to_string())?;
+        let content = toml::to_string(config).map_err(|e| format!("Serialize error: {}", e))?;
+        std::fs::write(&path, content).map_err(|e| format!("Write error: {}", e))?;
         Ok(())
     }
 }
 
-impl GemmaConfig {
+impl GemmaProviderConfig {
+    pub fn load(folder_name: &str) -> Result<Self, ConfigError> {
+        let exe_path = env::current_exe()
+            .map_err(|e| ConfigError::Message(format!("Failed to get executable path: {}", e)))?;
+        let exe_dir = exe_path.parent().ok_or_else(|| {
+            ConfigError::Message("Failed to get executable directory".to_string())
+        })?;
+        let path = exe_dir
+            .join("autohmjvis-support")
+            .join(folder_name)
+            .join("gemma");
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| ConfigError::Message("Invalid config path".to_string()))?;
+        let s = Config::builder()
+            .add_source(File::with_name(path_str).required(true))
+            .build()?;
+        s.try_deserialize()
+    }
+}
+
+impl OpenAIProviderConfig {
+    pub fn load(folder_name: &str) -> Result<Self, ConfigError> {
+        let exe_path = env::current_exe()
+            .map_err(|e| ConfigError::Message(format!("Failed to get executable path: {}", e)))?;
+        let exe_dir = exe_path.parent().ok_or_else(|| {
+            ConfigError::Message("Failed to get executable directory".to_string())
+        })?;
+        let path = exe_dir
+            .join("autohmjvis-support")
+            .join(folder_name)
+            .join("openai");
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| ConfigError::Message("Invalid config path".to_string()))?;
+        let s = Config::builder()
+            .add_source(File::with_name(path_str).required(true))
+            .build()?;
+        s.try_deserialize()
+    }
+}
+
+impl AIConfig {
     pub fn load(folder_name: &str) -> Result<Self, ConfigError> {
         // Get the executable's directory
         let exe_path = env::current_exe()
@@ -139,18 +179,18 @@ impl GemmaConfig {
         })?;
 
         // Build path to config file relative to executable
-        let gemma_config_path = exe_dir
+        let ai_config_path = exe_dir
             .join("autohmjvis-support")
             .join(folder_name)
-            .join("gemma");
+            .join("ai");
 
-        let gemma_config_path_str = gemma_config_path
+        let ai_config_path_str = ai_config_path
             .to_str()
             .ok_or_else(|| ConfigError::Message("Invalid config path".to_string()))?;
 
         let s = Config::builder()
             // Load configuration file from executable's directory
-            .add_source(File::with_name(gemma_config_path_str).required(true))
+            .add_source(File::with_name(ai_config_path_str).required(true))
             .build()?;
 
         // You can deserialize (and thus freeze) the entire configuration as

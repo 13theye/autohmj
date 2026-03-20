@@ -3,6 +3,7 @@ pub mod content;
 pub mod effects;
 pub mod events;
 pub mod fps;
+pub mod gemma;
 pub mod intro;
 pub mod models;
 pub mod openai;

@@ -1,0 +1,5 @@
+api_key = ""
+url = "http://127.0.0.1:1234/v1"
+model = "openai/gpt-oss-20b"
+strict_request_object_adherence = false
+schema_description = "The AI's conversational response"

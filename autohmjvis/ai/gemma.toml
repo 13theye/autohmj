@@ -1,0 +1,4 @@
+api_key = "AIzaSyCvu1Ke0PH_2rGPrqp0V9Mx_iA2AwUPvys"
+url = "https://generativelanguage.googleapis.com/v1beta"
+model = "models/gemma-3-27b-it"
+

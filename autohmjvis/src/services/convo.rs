@@ -2,7 +2,7 @@
 //
 // Interface for the ConversationManager data model
 
-use crate::events::{GemmaEvent, HMJEventBus, ServerEvent, TranslationEvent};
+use crate::events::{AIEvent, HMJEventBus, ServerEvent, TranslationEvent};
 use crate::models::{Conversation, ConversationManager, ConvoItem};
 
 use tokio::sync::broadcast;
@@ -29,7 +29,7 @@ pub struct ConversationService {
     event_tx: broadcast::Sender<ConvoEvent>,
     translation_rx: broadcast::Receiver<TranslationEvent>, // subscribe to TranslationEvents
     server_rx: broadcast::Receiver<ServerEvent>,           // subscribe to Websocket ServerEvents
-    gemma_rx: broadcast::Receiver<GemmaEvent>,             // subscribe to GemmaEvents
+    gemma_rx: broadcast::Receiver<AIEvent>,                // subscribe to AIEvents
 }
 
 impl ConversationService {
@@ -40,7 +40,7 @@ impl ConversationService {
         // Subscribe to other events
         let event_tx = events.convo.clone();
         let server_rx = events.server.subscribe();
-        let gemma_rx = events.gemma.subscribe();
+        let gemma_rx = events.ai.subscribe();
 
         // Initialize ConversationManager
         let conversation = ConversationManager::default();
@@ -79,9 +79,9 @@ impl ConversationService {
             }
         }
 
-        // Receive messages from Gemma
+        // Receive messages from AI
         while let Ok(event) = self.gemma_rx.try_recv() {
-            if let GemmaEvent::GemmaReceived(response) = event {
+            if let AIEvent::AIReceived(response) = event {
                 // Add conversation item & notify subscribers
                 let item = Self::new_item(&response.author, &response.message);
                 self.add(item);

@@ -58,8 +58,8 @@ margin_line_stroke = 2
 output_directory = "frames"
 # directory for key.toml: secret keys
 auth = "auth"
-# directory for gemma.toml: Gemma AI config:
-gemma = "gemma"
+# directory for ai.toml: AI config:
+ai = "ai"
 # path to intro image:
 intro_image = "intro.png"
 

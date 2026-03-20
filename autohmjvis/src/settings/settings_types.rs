@@ -49,14 +49,13 @@ pub struct OscSendConfig {
 pub struct PathConfig {
     pub output_directory: String,
     pub auth: String,
-    pub gemma: String,
+    pub ai: String,
     pub intro_image: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct PersonaConfig {
     pub id: String,
-    pub model: String,
     pub prompt: String,
 }
 
@@ -113,4 +112,20 @@ pub struct TranslationConfig {
     pub enable_second_language: bool,
     pub target_language: String,
     pub second_target_language: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GemmaProviderConfig {
+    pub api_key: String,
+    pub url: String,
+    pub model: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpenAIProviderConfig {
+    pub api_key: Option<String>,
+    pub url: String,
+    pub model: String,
+    pub strict_request_object_adherence: bool,
+    pub schema_description: Option<String>,
 }
