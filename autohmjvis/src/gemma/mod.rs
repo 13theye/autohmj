@@ -103,7 +103,7 @@ async fn generate_response(
     api_key: String,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
     let url = format!(
-        "{base_url}{model}:generateContent?key={key}",
+        "{base_url}/{model}:generateContent?key={key}",
         base_url = base_url,
         model = model,
         key = api_key,
