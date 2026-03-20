@@ -85,8 +85,8 @@ fn model(app: &App) -> Model {
 
     let ai = AIService::new(
         &ai_config,
-        Box::new(GemmaProvider::new(&gemma_provider_config)),
-        //Box::new(OpenAIProvider::new(&openai_provider_config)),
+        //Box::new(GemmaProvider::new(&gemma_provider_config)),
+        Box::new(OpenAIProvider::new(&openai_provider_config)),
         &event_bus,
         rthandle,
     );

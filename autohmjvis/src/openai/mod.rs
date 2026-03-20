@@ -104,7 +104,18 @@ impl AIProvider for OpenAIProvider {
                             }
                         });
 
-                        let _ = tx.send(text).await;
+                        let message = text.map(|raw| {
+                            // Strip any control-token prefix (e.g. "<|channel|>final <|constrain|>JSON<|message|>")
+                            // that OpenAI's Responses API leaks before the JSON payload.
+                            let json_str = raw.find('{').map(|i| &raw[i..]).unwrap_or(&raw);
+                            serde_json::from_str::<crate::openai::types::ConvoResponse>(json_str)
+                                .map(|r| r.message)
+                                .unwrap_or_else(|_| {
+                                    eprintln!("OpenAIProvider: failed to parse ConvoResponse JSON, using raw text");
+                                    raw
+                                })
+                        });
+                        let _ = tx.send(message).await;
                     }
                     Err(e) => {
                         eprintln!("OpenAIProvider: API error: {}", e);
