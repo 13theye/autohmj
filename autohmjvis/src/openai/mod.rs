@@ -28,6 +28,8 @@ impl OpenAIProvider {
             .with_api_key(config.api_key.clone().unwrap_or_default())
             .with_api_base(config.url.clone());
 
+        println!("Starting OpenAIProvider...");
+
         Self {
             model: config.model.clone(),
             schema_desc: config.schema_description.clone(),

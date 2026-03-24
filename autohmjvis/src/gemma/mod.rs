@@ -21,6 +21,8 @@ pub struct GemmaProvider {
 
 impl GemmaProvider {
     pub fn new(config: &GemmaProviderConfig) -> Self {
+        println!("Starting GemmaProvider...");
+
         Self {
             api_key: config.api_key.clone(),
             url: config.url.clone(),
