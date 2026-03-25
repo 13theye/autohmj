@@ -35,7 +35,7 @@ fn convo_response_json_schema(description: Option<String>) -> ResponseFormatJson
 /// Helper function to allow default generation of ReasoningConfig for this app.
 pub fn reasoning_config() -> Reasoning {
     Reasoning {
-        effort: Some(ReasoningEffort::Low),
+        effort: Some(ReasoningEffort::Medium),
         summary: None,
     }
 }

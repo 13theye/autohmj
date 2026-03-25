@@ -9,30 +9,57 @@ use tokio::sync::{broadcast, mpsc};
 use crate::{
     events::HMJEventBus,
     models::{Conversation, ConvoItem},
-    settings::AIConfig,
+    settings::PersonaConfig,
 };
 
-// ===== Provider trait =====
+// ===== Provider context types =====
 
-/// Provider-agnostic message representation passed to AIProvider.
+/// Raw semantic context passed to a provider.
+/// Providers receive this and perform all message formatting themselves.
 #[derive(Clone, Debug)]
-pub struct AIMessage {
-    pub role: AIRole,
+pub enum AIContext {
+    /// A regular persona turn.
+    Persona(PersonaContext),
+    /// The moderator turn — all history flattened, no system prompt.
+    Moderator(ModeratorContext),
+}
+
+/// Everything a provider needs to format a persona request.
+#[derive(Clone, Debug)]
+pub struct PersonaContext {
+    /// System prompt and personality concatenated: `system_prompt + " Personality: " + personality`
+    pub instructions: String,
+    /// The ID of the persona making this request (used to attribute model vs. user role).
+    pub persona_id: String,
+    /// Ordered conversation history at the time of the request.
+    pub history: Vec<ContextMessage>,
+    /// Optional new message to append (not yet in `history`).
+    pub new_item: Option<ContextMessage>,
+}
+
+/// Everything a provider needs to format a moderator request.
+#[derive(Clone, Debug)]
+pub struct ModeratorContext {
+    /// The moderator's personality prompt.
+    pub instructions: String,
+    /// Full ordered conversation history.
+    pub history: Vec<ContextMessage>,
+}
+
+/// A single conversation entry — author + text. Providers assign roles themselves.
+#[derive(Clone, Debug)]
+pub struct ContextMessage {
+    pub author: String,
     pub content: String,
 }
 
-/// Role of a message in the conversation.
-#[derive(Clone, Debug, PartialEq)]
-pub enum AIRole {
-    User,
-    Model,
-}
+// ===== Provider trait =====
 
 /// Interface between the AI service layer and a specific API provider.
 pub trait AIProvider: Send + Sync + 'static {
     fn spawn_request(
         &self,
-        messages: Vec<AIMessage>,
+        context: AIContext,
         tx: mpsc::Sender<Option<String>>,
         rthandle: &tokio::runtime::Handle,
         shutdown_rx: broadcast::Receiver<()>,
@@ -66,14 +93,16 @@ pub struct AIService {
 
 impl AIService {
     pub fn new(
-        config: &AIConfig,
+        persona_1: &PersonaConfig,
+        persona_2: &PersonaConfig,
+        moderator: &PersonaConfig,
+        system_prompt: String,
         provider: Box<dyn AIProvider>,
         events: &HMJEventBus,
         rthandle: tokio::runtime::Handle,
     ) -> Self {
-        let system_prompt = config.system.prompt.to_owned();
         let (shutdown_tx, _) = broadcast::channel(1);
-        let (instances, moderator_instance) = make_instances_from_config(config);
+        let (instances, moderator_instance) = make_instances_from_config(persona_1, persona_2, moderator);
         let moderator = AIModerator::from_ai_instance(moderator_instance);
         let event_tx = events.ai.clone();
 
@@ -104,8 +133,22 @@ impl AIService {
         new_item: Option<&ConvoItem>,
         conversation: &Conversation,
     ) -> Result<(), String> {
-        let ai_instance: &AIInstance = if ai_persona == AIPersona::Moderator {
-            &self.moderator.instance
+        let history: Vec<ContextMessage> = conversation
+            .values()
+            .map(|item| ContextMessage {
+                author: item.author.clone(),
+                content: item.message.clone(),
+            })
+            .collect();
+
+        let (context, tx, instance_id) = if ai_persona == AIPersona::Moderator {
+            let ctx = AIContext::Moderator(ModeratorContext {
+                instructions: self.moderator.instance.personality().to_owned(),
+                history,
+            });
+            let tx = self.moderator.instance.tx.clone();
+            let id = self.moderator.instance.id.clone();
+            (ctx, tx, id)
         } else {
             let Some(instance) = self.instances.get(&ai_persona) else {
                 return Err(format!(
@@ -113,26 +156,30 @@ impl AIService {
                     ai_persona
                 ));
             };
-            instance
+            let instructions = format!(
+                "{} Personality: {}",
+                self.system_prompt,
+                instance.personality()
+            );
+            let new_item = new_item.map(|i| ContextMessage {
+                author: i.author.clone(),
+                content: i.message.clone(),
+            });
+            let ctx = AIContext::Persona(PersonaContext {
+                instructions,
+                persona_id: instance.id.clone(),
+                history,
+                new_item,
+            });
+            let tx = instance.tx.clone();
+            let id = instance.id.clone();
+            (ctx, tx, id)
         };
 
-        // Format and generate provider-agnostic messages
-        let messages = if ai_persona == AIPersona::Moderator {
-            self.moderator.generate_contents(conversation)
-        } else {
-            ai_instance.generate_contents(new_item, conversation, &self.system_prompt)
-        };
-
-        let tx = ai_instance.tx.clone();
         let shutdown_rx = self.shutdown_tx.subscribe();
-
-        // Emit notification that an AI request has been sent
-        let _ = self
-            .event_tx
-            .send(AIEvent::AIRequested(ai_instance.id.to_owned()));
-
+        let _ = self.event_tx.send(AIEvent::AIRequested(instance_id));
         self.provider
-            .spawn_request(messages, tx, &self.rthandle, shutdown_rx);
+            .spawn_request(context, tx, &self.rthandle, shutdown_rx);
 
         Ok(())
     }
@@ -144,6 +191,7 @@ impl AIService {
         // Receive from moderator
         match self.moderator.instance.rx.try_recv() {
             Ok(Some(message)) => {
+                println!("Received response from moderator: {:#?}", message);
                 if message.contains("Human") {
                     let _ = self
                         .event_tx
@@ -172,6 +220,8 @@ impl AIService {
         for instance in self.instances.values_mut() {
             match instance.rx.try_recv() {
                 Ok(Some(message)) => {
+                    println!("Received response from Ai instance: {:#?}", message);
+
                     let _ = self.event_tx.send(AIEvent::AIReceived(AIResponse {
                         author: instance.id.to_owned(),
                         message,
@@ -228,53 +278,6 @@ impl AIInstance {
     pub fn personality(&self) -> &str {
         &self.personality.prompt
     }
-
-    fn build_prompt(&self, system_prompt: &str) -> String {
-        system_prompt.to_owned() + " Personality: " + self.personality()
-    }
-
-    /// Generate provider-agnostic messages for this instance.
-    pub fn generate_contents(
-        &self,
-        new_item: Option<&ConvoItem>,
-        conversation: &Conversation,
-        system_prompt: &str,
-    ) -> Vec<AIMessage> {
-        let mut messages = vec![
-            // Personality/system prompt as first user message
-            AIMessage {
-                role: AIRole::User,
-                content: self.build_prompt(system_prompt),
-            },
-        ];
-
-        // Add conversation history
-        for item in conversation.values() {
-            let role = if item.author == self.id {
-                AIRole::Model
-            } else {
-                AIRole::User
-            };
-
-            let content = if role == AIRole::User {
-                format_message(&item.author, &item.message)
-            } else {
-                item.message.to_owned()
-            };
-
-            messages.push(AIMessage { role, content });
-        }
-
-        // Append new_item if provided
-        if let Some(new_item) = new_item {
-            messages.push(AIMessage {
-                role: AIRole::User,
-                content: format_message(&new_item.author, &new_item.message),
-            });
-        }
-
-        messages
-    }
 }
 
 // ===== Moderator =====
@@ -295,31 +298,6 @@ impl AIModerator {
 
     pub fn from_ai_instance(instance: AIInstance) -> Self {
         Self { instance }
-    }
-
-    fn build_prompt(&self) -> String {
-        self.instance.personality().to_owned()
-    }
-
-    /// Generate provider-agnostic messages for the moderator.
-    /// All conversation items are placed in the User role.
-    pub fn generate_contents(&self, conversation: &Conversation) -> Vec<AIMessage> {
-        let mut messages = vec![
-            // Moderator prompt as first user message
-            AIMessage {
-                role: AIRole::User,
-                content: self.build_prompt(),
-            },
-        ];
-
-        for item in conversation.values() {
-            messages.push(AIMessage {
-                role: AIRole::User,
-                content: format_message(&item.author, &item.message),
-            });
-        }
-
-        messages
     }
 }
 
@@ -348,28 +326,26 @@ pub enum AIPersona {
 
 // ===== Helper functions =====
 
-fn format_message(author: &str, message: &str) -> String {
-    format!("{}: {}", author, message)
-}
-
-// Creates two AI instances and a moderator from the config file.
+// Creates two AI instances and a moderator from persona configs.
 pub fn make_instances_from_config(
-    config: &AIConfig,
+    persona_1: &PersonaConfig,
+    persona_2: &PersonaConfig,
+    moderator: &PersonaConfig,
 ) -> (HashMap<AIPersona, AIInstance>, AIInstance) {
     let mut personas = HashMap::new();
 
     let ai1 = AIInstance::new(
-        &config.persona_1.id,
+        &persona_1.id,
         Personality {
-            prompt: config.persona_1.prompt.to_owned(),
+            prompt: persona_1.prompt.to_owned(),
         },
     );
     println!("AI1 ID: {:?}", ai1.id);
 
     let ai2 = AIInstance::new(
-        &config.persona_2.id,
+        &persona_2.id,
         Personality {
-            prompt: config.persona_2.prompt.to_owned(),
+            prompt: persona_2.prompt.to_owned(),
         },
     );
     println!("AI2 ID: {:?}", ai2.id);
@@ -377,13 +353,13 @@ pub fn make_instances_from_config(
     personas.insert(AIPersona::AI1, ai1);
     personas.insert(AIPersona::AI2, ai2);
 
-    let moderator = AIInstance::new(
-        &config.moderator.id,
+    let moderator_instance = AIInstance::new(
+        &moderator.id,
         Personality {
-            prompt: config.moderator.prompt.to_owned(),
+            prompt: moderator.prompt.to_owned(),
         },
     );
-    println!("Moderator ID: {:?}", moderator.id);
+    println!("Moderator ID: {:?}", moderator_instance.id);
 
-    (personas, moderator)
+    (personas, moderator_instance)
 }

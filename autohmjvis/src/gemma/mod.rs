@@ -8,7 +8,7 @@ use reqwest::Client;
 use std::error::Error;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::services::ai::{AIMessage, AIProvider, AIRole};
+use crate::services::ai::{AIContext, AIProvider};
 use crate::settings::GemmaProviderConfig;
 use types::*;
 
@@ -35,12 +35,56 @@ impl GemmaProvider {
 impl AIProvider for GemmaProvider {
     fn spawn_request(
         &self,
-        messages: Vec<AIMessage>,
+        context: AIContext,
         tx: mpsc::Sender<Option<String>>,
         rthandle: &tokio::runtime::Handle,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) {
-        let contents = ai_messages_to_request_contents(messages);
+        let contents: Vec<RequestContent> = match context {
+            AIContext::Persona(ctx) => {
+                let mut parts = vec![RequestContent {
+                    role: "user".to_string(),
+                    parts: vec![Part { text: ctx.instructions }],
+                }];
+                for msg in &ctx.history {
+                    let is_self = msg.author == ctx.persona_id;
+                    let role = if is_self { "model" } else { "user" };
+                    let text = if is_self {
+                        msg.content.clone()
+                    } else {
+                        format!("{}: {}", msg.author, msg.content)
+                    };
+                    parts.push(RequestContent {
+                        role: role.to_string(),
+                        parts: vec![Part { text }],
+                    });
+                }
+                if let Some(new_msg) = ctx.new_item {
+                    parts.push(RequestContent {
+                        role: "user".to_string(),
+                        parts: vec![Part {
+                            text: format!("{}: {}", new_msg.author, new_msg.content),
+                        }],
+                    });
+                }
+                parts
+            }
+            AIContext::Moderator(ctx) => {
+                let mut parts = vec![RequestContent {
+                    role: "user".to_string(),
+                    parts: vec![Part { text: ctx.instructions }],
+                }];
+                for msg in &ctx.history {
+                    parts.push(RequestContent {
+                        role: "user".to_string(),
+                        parts: vec![Part {
+                            text: format!("{}: {}", msg.author, msg.content),
+                        }],
+                    });
+                }
+                parts
+            }
+        };
         let client = self.client.clone();
         let api_key = self.api_key.clone();
         let model = self.model.clone();
@@ -79,21 +123,6 @@ impl AIProvider for GemmaProvider {
             }
         });
     }
-}
-
-// Convert Vec<AIMessage> to Vec<RequestContent> for the Gemini API.
-// User role messages become "user" role (Gemini has no system role).
-fn ai_messages_to_request_contents(messages: Vec<AIMessage>) -> Vec<RequestContent> {
-    messages
-        .into_iter()
-        .map(|msg| RequestContent {
-            role: match msg.role {
-                AIRole::User => "user".to_string(),
-                AIRole::Model => "model".to_string(),
-            },
-            parts: vec![Part { text: msg.content }],
-        })
-        .collect()
 }
 
 // Sends a REST API request to Google Gemini

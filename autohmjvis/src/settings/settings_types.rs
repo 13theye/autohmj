@@ -53,7 +53,7 @@ pub struct PathConfig {
     pub intro_image: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct PersonaConfig {
     pub id: String,
     pub prompt: String,
@@ -116,16 +116,24 @@ pub struct TranslationConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct GemmaProviderConfig {
+    pub system_prompt: String,
     pub api_key: String,
     pub url: String,
     pub model: String,
+    pub persona_1: PersonaConfig,
+    pub persona_2: PersonaConfig,
+    pub moderator: PersonaConfig,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct OpenAIProviderConfig {
+    pub system_prompt: String,
     pub api_key: Option<String>,
     pub url: String,
     pub model: String,
     pub strict_request_object_adherence: bool,
     pub schema_description: Option<String>,
+    pub persona_1: PersonaConfig,
+    pub persona_2: PersonaConfig,
+    pub moderator: PersonaConfig,
 }

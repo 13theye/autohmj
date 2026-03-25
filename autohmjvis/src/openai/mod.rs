@@ -8,7 +8,7 @@ use crate::openai::types::{
     request_helpers,
     response::{MessageContent, OutputItem, ResponseObject},
 };
-use crate::services::ai::{AIMessage, AIProvider};
+use crate::services::ai::{AIContext, AIProvider};
 use crate::settings::OpenAIProviderConfig;
 
 use async_openai::{config::OpenAIConfig, types::responses, Client};
@@ -42,26 +42,37 @@ impl OpenAIProvider {
 impl AIProvider for OpenAIProvider {
     fn spawn_request(
         &self,
-        messages: Vec<AIMessage>,
+        context: AIContext,
         tx: mpsc::Sender<Option<String>>,
         rthandle: &tokio::runtime::Handle,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) {
         let model = self.model.clone();
 
-        // instructions = messages[0] (system prompt + personality)
-        let instructions = messages.first().map(|m| m.content.clone());
-
-        // input = messages[1..] joined by newlines (already formatted as "Author: text")
-        let input = messages
-            .get(1..)
-            .unwrap_or(&[])
-            .iter()
-            .map(|m| m.content.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
+        let (instructions, input) = match context {
+            AIContext::Persona(ctx) => {
+                let mut lines: Vec<String> = ctx
+                    .history
+                    .iter()
+                    .map(|msg| format!("{}: {}", msg.author, msg.content))
+                    .collect();
+                if let Some(new_msg) = ctx.new_item {
+                    lines.push(format!("{}: {}", new_msg.author, new_msg.content));
+                }
+                (Some(ctx.instructions), lines.join("\n"))
+            }
+            AIContext::Moderator(ctx) => {
+                let lines: Vec<String> = ctx
+                    .history
+                    .iter()
+                    .map(|msg| format!("{}: {}", msg.author, msg.content))
+                    .collect();
+                (Some(ctx.instructions), lines.join("\n"))
+            }
+        };
 
         let schema_desc = self.schema_desc.clone();
+
         let strict = self.strict;
         let client = self.client.clone();
 
@@ -91,6 +102,8 @@ impl AIProvider for OpenAIProvider {
                             "OpenAIProvider: Received successful response with id: {}",
                             response.id
                         );
+
+                        println!("Response body: {:#?}", response);
 
                         let text = response.output.iter().find_map(|item| {
                             if let OutputItem::Message(msg) = item {
@@ -154,14 +167,25 @@ fn generate_request(
     let mut request = if !strict {
         // Workaround: append instructions to input because the "instructions"
         // field isn't supported in LMStudio.
-        let text = serde_json::to_string(&text_config).unwrap_or_default();
+
+        // Enable this if using structured responses
+        let _text = serde_json::to_string(&text_config).unwrap_or_default();
+
         let content = if let Some(prompt) = prompt {
-            format!(
+            // Uncomment the following if using structures responses
+            /*format!(
                 "input : {}\ninstructions : {}\n text: {}",
                 content, prompt, text
-            )
+            )*/
+
+            // Uncomment the following if not using structured responses
+            format!("input : {}\ninstructions : {}", content, prompt)
         } else {
-            format!("input : {}\n text: {}", content, text)
+            // Uncomment the following if using structures responses
+            //format!("input : {}\n text: {}", content, text)
+
+            // Uncomment the following if not using structured responses
+            format!("input : {}", content)
         };
 
         responses::CreateResponseArgs::default()

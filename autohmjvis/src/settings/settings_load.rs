@@ -29,14 +29,6 @@ pub struct AuthConfig {
     pub google: GoogleConfig,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct AIConfig {
-    pub system: SystemPromptConfig,
-    pub persona_1: PersonaConfig,
-    pub persona_2: PersonaConfig,
-    pub moderator: PersonaConfig,
-}
-
 impl Settings {
     /************************* Config file loading ********************/
 
@@ -168,32 +160,3 @@ impl OpenAIProviderConfig {
     }
 }
 
-impl AIConfig {
-    pub fn load(folder_name: &str) -> Result<Self, ConfigError> {
-        // Get the executable's directory
-        let exe_path = env::current_exe()
-            .map_err(|e| ConfigError::Message(format!("Failed to get executable path: {}", e)))?;
-
-        let exe_dir = exe_path.parent().ok_or_else(|| {
-            ConfigError::Message("Failed to get executable directory".to_string())
-        })?;
-
-        // Build path to config file relative to executable
-        let ai_config_path = exe_dir
-            .join("autohmjvis-support")
-            .join(folder_name)
-            .join("ai");
-
-        let ai_config_path_str = ai_config_path
-            .to_str()
-            .ok_or_else(|| ConfigError::Message("Invalid config path".to_string()))?;
-
-        let s = Config::builder()
-            // Load configuration file from executable's directory
-            .add_source(File::with_name(ai_config_path_str).required(true))
-            .build()?;
-
-        // You can deserialize (and thus freeze) the entire configuration as
-        s.try_deserialize()
-    }
-}

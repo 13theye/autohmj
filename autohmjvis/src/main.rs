@@ -19,7 +19,7 @@ use autohmjvis::{
     server::HMJServer,
     services::{AIPersona, AIService, ConversationService, TranslationService},
     settings::{
-        AIConfig, GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig,
+        GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig,
         OscSendConfig, Settings, UiStateConfig, UiStateFileConfig,
     },
     ui::control_panel::ControlPanel,
@@ -39,10 +39,6 @@ fn model(app: &App) -> Model {
 
     let openai_provider_config = OpenAIProviderConfig::load(&config.paths.ai)
         .expect("\nAuto훈민정음: FAILED TO LOAD OPENAI.TOML\n");
-
-    // AI config from the /ai/ai.toml file
-    let ai_config =
-        AIConfig::load(&config.paths.ai).expect("\nAuto훈민정음: FAILED TO LOAD AI.TOML\n");
 
     // Init and start ClockService
     let mut clock = ClockService::with().tempo(config.tempo.bpm as f64).build();
@@ -84,7 +80,14 @@ fn model(app: &App) -> Model {
     );
 
     let ai = AIService::new(
-        &ai_config,
+        &openai_provider_config.persona_1,
+        &openai_provider_config.persona_2,
+        &openai_provider_config.moderator,
+        //&gemma_provider_config.persona_1,
+        //&gemma_provider_config.persona_2,
+        //&gemma_provider_config.moderator,
+        //gemma_provider_config.system_prompt.clone(),
+        openai_provider_config.system_prompt.clone(),
         //Box::new(GemmaProvider::new(&gemma_provider_config)),
         Box::new(OpenAIProvider::new(&openai_provider_config)),
         &event_bus,
@@ -218,12 +221,18 @@ fn model(app: &App) -> Model {
     }
 
     // Initialize three ContentManagers specific to this performance
-    let content = init_three_content_managers(&event_bus, &mut live_input_registry, &ai_config);
+    let content = init_three_content_managers(
+        &event_bus,
+        &mut live_input_registry,
+        &openai_provider_config.persona_1.id,
+        &openai_provider_config.persona_2.id,
+    );
 
     // Initialize three text grids specific to this performance
     let grids = init_three_grids(
         &config.grid,
-        &ai_config,
+        &openai_provider_config.persona_1.id,
+        &openai_provider_config.persona_2.id,
         &config.osc_send,
         &text_grid_fonts,
         &clock,
@@ -583,23 +592,20 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
 fn init_three_content_managers(
     event_bus: &HMJEventBus,
     live_input_registry: &mut LiveInputRegistry,
-    gemma_config: &AIConfig,
+    persona_1_id: &str,
+    persona_2_id: &str,
 ) -> Vec<ContentManager> {
     let human_content = ContentManager::new("Human", event_bus, live_input_registry);
-
-    let gemma1_content =
-        ContentManager::new(&gemma_config.persona_1.id, event_bus, live_input_registry);
-
-    let gemma2_content =
-        ContentManager::new(&gemma_config.persona_2.id, event_bus, live_input_registry);
-
-    vec![human_content, gemma1_content, gemma2_content]
+    let ai1_content = ContentManager::new(persona_1_id, event_bus, live_input_registry);
+    let ai2_content = ContentManager::new(persona_2_id, event_bus, live_input_registry);
+    vec![human_content, ai1_content, ai2_content]
 }
 
 // Initialize three text grids specific to this performance
 fn init_three_grids(
     grid_config: &GridConfig,
-    gemma_config: &AIConfig,
+    persona_1_id: &str,
+    persona_2_id: &str,
     osc_config: &OscSendConfig,
     text_grid_fonts: &TextGridFonts,
     clock: &ClockService,
@@ -616,8 +622,8 @@ fn init_three_grids(
         event_bus,
     );
 
-    let gemma1_grid = TextGrid::new(
-        &gemma_config.persona_1.id,
+    let ai1_grid = TextGrid::new(
+        persona_1_id,
         false,
         TextGridPosition::Left,
         grid_config,
@@ -627,8 +633,8 @@ fn init_three_grids(
         event_bus,
     );
 
-    let gemma2_grid = TextGrid::new(
-        &gemma_config.persona_2.id,
+    let ai2_grid = TextGrid::new(
+        persona_2_id,
         false,
         TextGridPosition::Right,
         grid_config,
@@ -638,7 +644,7 @@ fn init_three_grids(
         event_bus,
     );
 
-    vec![gemma1_grid, human_grid, gemma2_grid]
+    vec![ai1_grid, human_grid, ai2_grid]
 }
 
 // ****************************** Controller functions ******************************
