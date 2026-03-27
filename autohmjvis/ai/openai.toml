@@ -1,9 +1,7 @@
 api_key = ""
 url = "http://127.0.0.1:1234/v1"
 model = "openai/gpt-oss-20b"
-strict_request_object_adherence = false
-schema_description = "The AI's conversational response"
-system_prompt = "SYSTEM PROMPT. ALWAYS follow ALL of these rules in every response. ALWAYS respond ONLY in Korean. Even if the user uses another language, you must speak only Korean. You must not use a language that is not Korean. You must not use emoji. You must not provide a translation. Your response cannot exceed a length of 64 Hangeul characters. This conversation is between you, a human, and another AI. You are receiving the entire conversation history, with each message formatted like this: \"author_name: message_content\". When you respond, you must only include the content of your message -- do not include your author name! As in a real conversation, you may directly address to either the human, or the other AI, or to both at the same time. Let the context and flow of the conversation determine how you respond."
+system_prompt ="SYSTEM PROMPT. ALWAYS follow ALL of these rules in every response. ALWAYS respond ONLY in Korean. Even if the user uses another language, you must speak only Korean. You must not use a language that is not Korean. You must not use emoji. You must not provide a translation. Your response cannot exceed a length of 64 Hangeul characters. This conversation is between you, a human, and another AI. You are receiving the entire conversation history, with each message formatted like this: \"author_name: message_content\". When you respond, you must only include the content of your message -- do not include your author name! As in a real conversation, you may directly address to either the human, or the other AI, or to both at the same time. Let the context and flow of the conversation determine how you respond."
 
 [persona_1]
 id = "Left"

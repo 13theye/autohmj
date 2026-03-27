@@ -19,8 +19,8 @@ use autohmjvis::{
     server::HMJServer,
     services::{AIPersona, AIService, ConversationService, TranslationService},
     settings::{
-        GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig,
-        OscSendConfig, Settings, UiStateConfig, UiStateFileConfig,
+        GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig, OscSendConfig,
+        Settings, UiStateConfig, UiStateFileConfig,
     },
     ui::control_panel::ControlPanel,
     views::{BackgroundManager, TextGrid, TextGridFonts, TextGridPosition},

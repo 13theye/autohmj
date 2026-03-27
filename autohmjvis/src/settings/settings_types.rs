@@ -131,8 +131,6 @@ pub struct OpenAIProviderConfig {
     pub api_key: Option<String>,
     pub url: String,
     pub model: String,
-    pub strict_request_object_adherence: bool,
-    pub schema_description: Option<String>,
     pub persona_1: PersonaConfig,
     pub persona_2: PersonaConfig,
     pub moderator: PersonaConfig,
