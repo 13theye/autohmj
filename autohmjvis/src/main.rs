@@ -10,15 +10,17 @@ use std::{cell::RefCell, collections::HashMap, fs};
 
 use autohmjvis::{
     content::ContentManager,
-    events::{GemmaEvent, HMJEventBus},
+    events::{AIEvent, HMJEventBus},
     fps::FpsManager,
+    gemma::GemmaProvider,
     intro::IntroImage,
     models::{CommandMessage, HMJMessageWrapper, HumansTurn, LiveInputRegistry, Model},
+    openai::OpenAIProvider,
     server::HMJServer,
-    services::{ConversationService, GemmaPersona, GemmaService, TranslationService},
+    services::{AIPersona, AIService, ConversationService, TranslationService},
     settings::{
-        AuthConfig, GemmaConfig, GridConfig, HumanColorConfig, OscSendConfig, Settings,
-        UiStateConfig, UiStateFileConfig,
+        GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig, OscSendConfig,
+        Settings, UiStateConfig, UiStateFileConfig,
     },
     ui::control_panel::ControlPanel,
     views::{BackgroundManager, TextGrid, TextGridFonts, TextGridPosition},
@@ -31,13 +33,12 @@ fn model(app: &App) -> Model {
     // Load configs
     // general config from the CONFIG.TOML file
     let config = Settings::load().expect("\nAuto훈민정음: FAILED TO LOAD CONFIG.TOML\n");
-    // Gemma API key from the /auth/key.toml file
-    let auth_config = AuthConfig::load(&config.paths.auth)
-        .unwrap_or_else(|e| panic!("\nAuto훈민정음: FAILED TO LOAD KEY.TOML\nError: {:?}\n", e));
-
-    // Gemma config from the /gemma/gemma.toml file
-    let gemma_config = GemmaConfig::load(&config.paths.gemma)
+    // Gemma provider config from the /ai/gemma.toml file
+    let gemma_provider_config = GemmaProviderConfig::load(&config.paths.ai)
         .expect("\nAuto훈민정음: FAILED TO LOAD GEMMA.TOML\n");
+
+    let openai_provider_config = OpenAIProviderConfig::load(&config.paths.ai)
+        .expect("\nAuto훈민정음: FAILED TO LOAD OPENAI.TOML\n");
 
     // Init and start ClockService
     let mut clock = ClockService::with().tempo(config.tempo.bpm as f64).build();
@@ -52,8 +53,8 @@ fn model(app: &App) -> Model {
     // Initialize event bus
     let event_bus = HMJEventBus::default();
 
-    // Subscribe to Gemma events
-    let gemma_rx = event_bus.gemma.subscribe();
+    // Subscribe to AI events
+    let gemma_rx = event_bus.ai.subscribe();
 
     // Create shared Tokio runtime and distribute handles to services
     let runtime = tokio::runtime::Runtime::new().expect("Failed to create shared Tokio runtime");
@@ -77,9 +78,18 @@ fn model(app: &App) -> Model {
         config.translation.enable_second_language,
         rthandle.clone(),
     );
-    let ai = GemmaService::new(
-        &gemma_config,
-        &auth_config.google.api_key,
+
+    let ai = AIService::new(
+        &openai_provider_config.persona_1,
+        &openai_provider_config.persona_2,
+        &openai_provider_config.moderator,
+        //&gemma_provider_config.persona_1,
+        //&gemma_provider_config.persona_2,
+        //&gemma_provider_config.moderator,
+        //gemma_provider_config.system_prompt.clone(),
+        openai_provider_config.system_prompt.clone(),
+        //Box::new(GemmaProvider::new(&gemma_provider_config)),
+        Box::new(OpenAIProvider::new(&openai_provider_config)),
         &event_bus,
         rthandle,
     );
@@ -211,12 +221,18 @@ fn model(app: &App) -> Model {
     }
 
     // Initialize three ContentManagers specific to this performance
-    let content = init_three_content_managers(&event_bus, &mut live_input_registry, &gemma_config);
+    let content = init_three_content_managers(
+        &event_bus,
+        &mut live_input_registry,
+        &openai_provider_config.persona_1.id,
+        &openai_provider_config.persona_2.id,
+    );
 
     // Initialize three text grids specific to this performance
     let grids = init_three_grids(
         &config.grid,
-        &gemma_config,
+        &openai_provider_config.persona_1.id,
+        &openai_provider_config.persona_2.id,
         &config.osc_send,
         &text_grid_fonts,
         &clock,
@@ -370,8 +386,13 @@ fn update_control_panel(model: &mut Model, update: Update) {
                                     human_color: HumanColorConfig { r, g, b, a },
                                 };
                                 match UiStateConfig::save(&config) {
-                                    Ok(()) => model.control_panel.save_status = Some("Saved".to_string()),
-                                    Err(e) => model.control_panel.save_status = Some(format!("Error: {}", e)),
+                                    Ok(()) => {
+                                        model.control_panel.save_status = Some("Saved".to_string())
+                                    }
+                                    Err(e) => {
+                                        model.control_panel.save_status =
+                                            Some(format!("Error: {}", e))
+                                    }
                                 }
                             }
                             ui.add_space(15.0);
@@ -379,7 +400,8 @@ fn update_control_panel(model: &mut Model, update: Update) {
                                 let loaded = UiStateConfig::load();
                                 let c = loaded.human_color;
                                 model.control_panel.human_color = [c.r, c.g, c.b, c.a];
-                                model.control_panel.save_status = Some("Reverted changes.".to_string());
+                                model.control_panel.save_status =
+                                    Some("Reverted changes.".to_string());
                             }
                         });
                         ui.label(model.control_panel.save_status.as_deref().unwrap_or(""));
@@ -570,23 +592,20 @@ fn audience_view(app: &App, model: &Model, frame: Frame) {
 fn init_three_content_managers(
     event_bus: &HMJEventBus,
     live_input_registry: &mut LiveInputRegistry,
-    gemma_config: &GemmaConfig,
+    persona_1_id: &str,
+    persona_2_id: &str,
 ) -> Vec<ContentManager> {
     let human_content = ContentManager::new("Human", event_bus, live_input_registry);
-
-    let gemma1_content =
-        ContentManager::new(&gemma_config.persona_1.id, event_bus, live_input_registry);
-
-    let gemma2_content =
-        ContentManager::new(&gemma_config.persona_2.id, event_bus, live_input_registry);
-
-    vec![human_content, gemma1_content, gemma2_content]
+    let ai1_content = ContentManager::new(persona_1_id, event_bus, live_input_registry);
+    let ai2_content = ContentManager::new(persona_2_id, event_bus, live_input_registry);
+    vec![human_content, ai1_content, ai2_content]
 }
 
 // Initialize three text grids specific to this performance
 fn init_three_grids(
     grid_config: &GridConfig,
-    gemma_config: &GemmaConfig,
+    persona_1_id: &str,
+    persona_2_id: &str,
     osc_config: &OscSendConfig,
     text_grid_fonts: &TextGridFonts,
     clock: &ClockService,
@@ -603,8 +622,8 @@ fn init_three_grids(
         event_bus,
     );
 
-    let gemma1_grid = TextGrid::new(
-        &gemma_config.persona_1.id,
+    let ai1_grid = TextGrid::new(
+        persona_1_id,
         false,
         TextGridPosition::Left,
         grid_config,
@@ -614,8 +633,8 @@ fn init_three_grids(
         event_bus,
     );
 
-    let gemma2_grid = TextGrid::new(
-        &gemma_config.persona_2.id,
+    let ai2_grid = TextGrid::new(
+        persona_2_id,
         false,
         TextGridPosition::Right,
         grid_config,
@@ -625,7 +644,7 @@ fn init_three_grids(
         event_bus,
     );
 
-    vec![gemma1_grid, human_grid, gemma2_grid]
+    vec![ai1_grid, human_grid, ai2_grid]
 }
 
 // ****************************** Controller functions ******************************
@@ -697,27 +716,19 @@ fn receive_hmjmessage(model: &mut Model) {
                 }
                 CommandMessage::AISend(ai_id) => match ai_id.as_str() {
                     "Left" => {
-                        let _ = model
-                            .ai
-                            .send(GemmaPersona::Gemma1, None, model.convo.entries());
+                        let _ = model.ai.send(AIPersona::AI1, None, model.convo.entries());
                     }
                     "Right" => {
-                        let _ = model
-                            .ai
-                            .send(GemmaPersona::Gemma2, None, model.convo.entries());
+                        let _ = model.ai.send(AIPersona::AI2, None, model.convo.entries());
                     }
                     "Both" => {
-                        let _ = model
-                            .ai
-                            .send(GemmaPersona::Gemma1, None, model.convo.entries());
-                        let _ = model
-                            .ai
-                            .send(GemmaPersona::Gemma2, None, model.convo.entries());
+                        let _ = model.ai.send(AIPersona::AI1, None, model.convo.entries());
+                        let _ = model.ai.send(AIPersona::AI2, None, model.convo.entries());
                     }
                     "Moderator" => {
                         let _ = model
                             .ai
-                            .send(GemmaPersona::Moderator, None, model.convo.entries());
+                            .send(AIPersona::Moderator, None, model.convo.entries());
                     }
                     _ => {
                         println!("Unknown AI ID: {}", ai_id);
@@ -741,22 +752,22 @@ fn receive_hmjmessage(model: &mut Model) {
     }
 }
 
-// Handle moderator events from the GemmaService
+// Handle moderator events from the AIService
 fn handle_moderator_events(model: &mut Model) {
     while let Ok(event) = model.gemma_rx.try_recv() {
-        if let GemmaEvent::ModeratorChooses(id) = event {
+        if let AIEvent::ModeratorChooses(id) = event {
             println!("Moderator chooses: {:?}", id);
             if id == "Human" {
                 model.humans_turn = HumansTurn::True;
             } else {
-                let persona: GemmaPersona;
+                let persona: AIPersona;
                 if id == "Left" {
                     model.humans_turn = HumansTurn::False;
-                    persona = GemmaPersona::Gemma1;
+                    persona = AIPersona::AI1;
                     let _ = model.ai.send(persona, None, model.convo.entries());
                 } else if id == "Right" {
                     model.humans_turn = HumansTurn::False;
-                    persona = GemmaPersona::Gemma2;
+                    persona = AIPersona::AI2;
                     let _ = model.ai.send(persona, None, model.convo.entries());
                 } else {
                     model.humans_turn = HumansTurn::Error;

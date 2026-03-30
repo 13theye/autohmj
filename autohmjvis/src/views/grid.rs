@@ -50,6 +50,7 @@ pub struct TextGridParams {
     pub margin_line_stroke: f32,
     pub grid_text_layout: Layout,
     pub translation_text_layout: Layout,
+    pub translation_text_layout_small: Layout,
     pub statusbar_text_layout: Layout,
     pub fonts: TextGridFonts,
 }
@@ -66,6 +67,14 @@ impl TextGridParams {
         let text_layout_builder = nannou::text::layout::Builder::default();
         let translation_text_layout = text_layout_builder
             .font_size(grid_config.font_size_translation)
+            .line_spacing(15.0)
+            .wrap_by_word()
+            .center_justify()
+            .build();
+
+        let text_layout_builder = nannou::text::layout::Builder::default();
+        let translation_text_layout_small = text_layout_builder
+            .font_size((grid_config.font_size_translation as f32 * 0.65) as u32)
             .line_spacing(15.0)
             .wrap_by_word()
             .center_justify()
@@ -96,6 +105,7 @@ impl TextGridParams {
             margin_line_stroke: grid_config.margin_line_stroke as f32,
             grid_text_layout,
             translation_text_layout,
+            translation_text_layout_small,
             statusbar_text_layout,
             fonts,
         }
@@ -116,9 +126,6 @@ impl TextGridParams {
 
 pub struct TextGridStyle {
     pub base_color: Rgba,
-    pub translation_color: Rgba,
-    pub font_size: u32,
-    pub translation_font_size: u32,
     pub cell_bgcolor: Rgba,
 }
 
@@ -126,9 +133,6 @@ impl Default for TextGridStyle {
     fn default() -> Self {
         Self {
             base_color: rgba(0.0, 0.0, 0.0, 1.0),
-            translation_color: rgba(1.0, 1.0, 1.0, 1.0),
-            font_size: 60,
-            translation_font_size: 40,
             cell_bgcolor: rgba(1.0, 1.0, 1.0, 1.0),
         }
     }
@@ -138,9 +142,6 @@ impl TextGridStyle {
     pub fn init_white() -> Self {
         Self {
             base_color: rgba(0.0, 0.0, 0.0, 1.0),
-            translation_color: rgba(1.0, 1.0, 1.0, 1.0),
-            font_size: 60,
-            translation_font_size: 40,
             cell_bgcolor: rgba(1.0, 1.0, 1.0, 1.0),
         }
     }
@@ -609,6 +610,37 @@ impl TextGrid {
         ))
     }
 
+    /// Returns a rect for the empty rows at the bottom of the partially-filled leftmost column, if any.
+    /// Used as a fallback when unfilled_cols_rect() returns None.
+    fn partial_col_rect(&self) -> Option<Rect> {
+        let filled = self.filled_cells_count();
+        if filled == 0 {
+            return None;
+        }
+        let partial_col_filled_rows = filled % self.params.rows;
+        if partial_col_filled_rows == 0 {
+            return None; // leftmost column is completely filled
+        }
+
+        let n_empty = self.params.rows - partial_col_filled_rows;
+        let empty_height = self.params.cell_height * n_empty as f32
+            + self.params.grid_line_stroke * (n_empty as f32 - 1.0);
+
+        let top_right = self.params.rect().top_right();
+        let top_empty_y = top_right.y
+            - partial_col_filled_rows as f32
+                * (self.params.grid_line_stroke + self.params.cell_height);
+        let center_y = top_empty_y - empty_height / 2.0;
+
+        let left_edge_x = self.params.origin.x - self.params.width() / 2.0;
+        let center_x = left_edge_x + self.params.cell_width / 2.0;
+
+        Some(Rect::from_xy_wh(
+            vec2(center_x, center_y),
+            vec2(self.params.cell_width, empty_height),
+        ))
+    }
+
     /// Clears the content_chars and the latest_convo_item
     pub fn clear(&mut self) {
         self.content_chars = Vec::with_capacity(0);
@@ -655,21 +687,34 @@ impl TextGrid {
             if let Some((_idx, convo_item)) = &self.latest_convo_item {
                 // If there's a translation
                 if let Some(translation) = &convo_item.translation {
-                    // and there's room to display it
-                    if let Some(unfilled_rect) = self.unfilled_cols_rect() {
-                        let unfilled_cols =
-                            self.params.cols.saturating_sub(self.filled_cols_count());
-                        let rotate_sideways = unfilled_cols < 3;
+                    let (maybe_rect, rotate_sideways) =
+                        if let Some(unfilled_rect) = self.unfilled_cols_rect() {
+                            let unfilled_cols =
+                                self.params.cols.saturating_sub(self.filled_cols_count());
+                            let rotate = unfilled_cols < 3;
+                            let rect = if rotate {
+                                unfilled_rect.pad_right(8.0)
+                            } else {
+                                unfilled_rect
+                            };
+                            (Some(rect), rotate)
+                        } else if let Some(partial_rect) = self.partial_col_rect() {
+                            (Some(partial_rect.pad_right(8.0)), true)
+                        } else {
+                            (None, false)
+                        };
 
+                    if let Some(rect) = maybe_rect {
                         let translation_view = TranslationView {
                             content1: translation.to_owned(),
                             content2: convo_item.translation2.to_owned(),
-                            rect: unfilled_rect.pad(10.0),
+                            rect: rect.pad(10.0),
                         };
 
                         translation_view.draw(
                             draw,
                             &self.params.translation_text_layout,
+                            &self.params.translation_text_layout_small,
                             &self.params.fonts,
                             rotate_sideways,
                             self.text_style.cell_bgcolor,
