@@ -126,9 +126,6 @@ impl TextGridParams {
 
 pub struct TextGridStyle {
     pub base_color: Rgba,
-    pub translation_color: Rgba,
-    pub font_size: u32,
-    pub translation_font_size: u32,
     pub cell_bgcolor: Rgba,
 }
 
@@ -136,9 +133,6 @@ impl Default for TextGridStyle {
     fn default() -> Self {
         Self {
             base_color: rgba(0.0, 0.0, 0.0, 1.0),
-            translation_color: rgba(1.0, 1.0, 1.0, 1.0),
-            font_size: 60,
-            translation_font_size: 40,
             cell_bgcolor: rgba(1.0, 1.0, 1.0, 1.0),
         }
     }
@@ -148,9 +142,6 @@ impl TextGridStyle {
     pub fn init_white() -> Self {
         Self {
             base_color: rgba(0.0, 0.0, 0.0, 1.0),
-            translation_color: rgba(1.0, 1.0, 1.0, 1.0),
-            font_size: 60,
-            translation_font_size: 40,
             cell_bgcolor: rgba(1.0, 1.0, 1.0, 1.0),
         }
     }
@@ -700,7 +691,13 @@ impl TextGrid {
                         if let Some(unfilled_rect) = self.unfilled_cols_rect() {
                             let unfilled_cols =
                                 self.params.cols.saturating_sub(self.filled_cols_count());
-                            (Some(unfilled_rect), unfilled_cols < 3)
+                            let rotate = unfilled_cols < 3;
+                            let rect = if rotate {
+                                unfilled_rect.pad_right(8.0)
+                            } else {
+                                unfilled_rect
+                            };
+                            (Some(rect), rotate)
                         } else if let Some(partial_rect) = self.partial_col_rect() {
                             (Some(partial_rect.pad_right(8.0)), true)
                         } else {

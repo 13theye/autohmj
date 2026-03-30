@@ -77,7 +77,8 @@ impl TranslationView {
 
     /// Returns `true` if `content` would overflow the bounds of `self.rect` when rotated 90°.
     /// Uses `self.rect.h()` as the layout width (the rotated text's available horizontal span)
-    /// and checks the resulting content height against `self.rect.w()`.
+    /// and checks the resulting content height against `self.rect.w()`, reserving 8px of
+    /// padding on the grid-facing side to prevent visual clipping.
     fn exceeds_x_bounds(&self, content: &str, layout: &Layout, font: Font) -> bool {
         let probe_rect = Rect::from_xy_wh(self.rect.xy(), vec2(self.rect.h(), 10_000.0));
         let height = text::text(content)
@@ -86,7 +87,7 @@ impl TranslationView {
             .build(probe_rect)
             .bounding_rect()
             .h();
-        height > self.rect.w()
+        height > self.rect.w() - 16.0
     }
 
     pub fn draw(
@@ -100,7 +101,7 @@ impl TranslationView {
     ) {
         let content = if let Some(content2) = &self.content2 {
             format!(
-                "{}\n–––––\n{}",
+                "{}\n\n{}",
                 self.content1.to_uppercase(),
                 content2.to_uppercase()
             )
@@ -113,7 +114,11 @@ impl TranslationView {
 
         // Inline separator variants (no newlines around separator)
         let inline_content = if let Some(content2) = &self.content2 {
-            format!("{} ///// {}", self.content1.to_uppercase(), content2.to_uppercase())
+            format!(
+                "{} ///// {}",
+                self.content1.to_uppercase(),
+                content2.to_uppercase()
+            )
         } else {
             self.content1.to_uppercase()
         };
@@ -128,7 +133,11 @@ impl TranslationView {
                     Some((&word_per_line_content, layout))
                 } else if !self.exceeds_x_bounds(&content, layout, font.clone()) {
                     Some((&content, layout))
-                } else if !self.exceeds_x_bounds(&word_per_line_inline_content, layout, font.clone()) {
+                } else if !self.exceeds_x_bounds(
+                    &word_per_line_inline_content,
+                    layout,
+                    font.clone(),
+                ) {
                     Some((&word_per_line_inline_content, layout))
                 } else if !self.exceeds_x_bounds(&inline_content, layout, font.clone()) {
                     Some((&inline_content, layout))
@@ -155,11 +164,15 @@ impl TranslationView {
                 }
             };
 
+            // Shift the render rect the (full right padding) left so the gap lands entirely
+            // on the grid-facing side.
+            let render_rect =
+                Rect::from_xy_wh(vec2(self.rect.x() - 16.0, self.rect.y()), self.rect.wh());
             let rotated_draw = draw.rotate(std::f32::consts::FRAC_PI_2);
             rotated_draw
                 .text(display_content)
-                .xy(vec2(self.rect.xy().y, -self.rect.xy().x))
-                .wh(vec2(self.rect.wh().y, self.rect.wh().x))
+                .xy(vec2(render_rect.xy().y, -render_rect.xy().x))
+                .wh(vec2(render_rect.wh().y, render_rect.wh().x))
                 .layout(active_layout)
                 .font(font)
                 .color(color);
@@ -170,7 +183,11 @@ impl TranslationView {
                     (&word_per_line_content, layout)
                 } else if !self.exceeds_y_bounds(&content, layout, font.clone()) {
                     (&content, layout)
-                } else if !self.exceeds_y_bounds(&word_per_line_inline_content, layout, font.clone()) {
+                } else if !self.exceeds_y_bounds(
+                    &word_per_line_inline_content,
+                    layout,
+                    font.clone(),
+                ) {
                     (&word_per_line_inline_content, layout)
                 } else if !self.exceeds_y_bounds(&inline_content, layout, font.clone()) {
                     (&inline_content, layout)
