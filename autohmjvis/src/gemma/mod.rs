@@ -8,7 +8,7 @@ use reqwest::Client;
 use std::error::Error;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::services::ai::{AIContext, AIProvider};
+use crate::services::ai::{AIContext, AIProvider, ProviderOutput};
 use crate::settings::GemmaProviderConfig;
 use types::*;
 
@@ -36,7 +36,7 @@ impl AIProvider for GemmaProvider {
     fn spawn_request(
         &self,
         context: AIContext,
-        tx: mpsc::Sender<Option<String>>,
+        tx: mpsc::Sender<Option<ProviderOutput>>,
         rthandle: &tokio::runtime::Handle,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) {
@@ -101,7 +101,7 @@ impl AIProvider for GemmaProvider {
                 match generate_response(contents, model, url, client, api_key).await {
                     Ok(response) => {
                         println!("Received successful response of length {}", response.len());
-                        let _ = tx.send(Some(response)).await;
+                        let _ = tx.send(Some(ProviderOutput { message: response, response_id: None })).await;
                     }
                     Err(e) => {
                         eprintln!("Gemma API error: {}", e);

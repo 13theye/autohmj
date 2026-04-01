@@ -753,6 +753,7 @@ fn receive_hmjmessage(model: &mut Model) {
                 }
                 CommandMessage::ResetConversation => {
                     model.convo.reset();
+                    model.ai.reset_response_ids();
                     for grid in model.grids.iter_mut() {
                         grid.clear();
                     }
