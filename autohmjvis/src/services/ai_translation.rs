@@ -2,7 +2,13 @@
 //
 // AI-based translation backend. Uses an OpenAI-compatible Chat Completions
 // endpoint to translate a message into all requested languages in a single
-// request, returning results as JSON.
+// request, returning results as JSON keyed by DeepL-style language codes
+// (e.g. "EN", "ES", "FR"). Which languages are requested is determined at
+// runtime from the slots passed by TranslationService — respecting the same
+// `target_language`, `second_target_language`, and `enable_second_language`
+// settings used by DeepLXProvider.
+
+use std::collections::HashMap;
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -56,31 +62,43 @@ struct ChatChoice {
     message: ChatMessage,
 }
 
-// ===== Expected JSON response from the AI =====
+// ===== Helpers =====
 
-#[derive(Deserialize)]
-struct TranslationResult {
-    english: Option<String>,
-    spanish: Option<String>,
-    french: Option<String>,
-    korean: Option<String>,
+/// Returns the uppercase DeepL-style language code for a TranslationLanguage.
+/// Matches the codes used at deepl.com (EN, ES, FR, ...).
+fn deeplx_code(language: &TranslationLanguage) -> &'static str {
+    match language {
+        TranslationLanguage::English => "EN",
+        TranslationLanguage::Spanish => "ES",
+        TranslationLanguage::French => "FR",
+        TranslationLanguage::Korean => "KO",
+    }
 }
 
-fn extract_translation(language: &TranslationLanguage, result: &TranslationResult) -> Option<String> {
-    match language {
-        TranslationLanguage::English => result.english.clone(),
-        TranslationLanguage::Spanish => result.spanish.clone(),
-        TranslationLanguage::French => result.french.clone(),
-        TranslationLanguage::Korean => result.korean.clone(),
-    }
+/// Extracts the JSON object substring from a model response, stripping any
+/// surrounding markdown code fences or whitespace the model may have added.
+fn extract_json(s: &str) -> &str {
+    let start = s.find('{').unwrap_or(0);
+    let end = s.rfind('}').map(|i| i + 1).unwrap_or(s.len());
+    &s[start..end]
 }
 
 // ===== TranslationProvider impl =====
 
 impl TranslationProvider for AITranslationProvider {
-    /// Sends a single Chat Completions request for all requested slots.
-    /// Uses the full conversation history as context, asking the AI to
-    /// translate only the last message.
+    /// Sends a single Chat Completions request for all active slots.
+    ///
+    /// The language list and expected JSON format are built dynamically from
+    /// `slots`, so the request automatically respects `enable_second_language`,
+    /// `target_language`, and `second_target_language` from config without any
+    /// extra configuration here.
+    ///
+    /// Request structure:
+    ///   System: base instructions (from config prompt)
+    ///   User:   full conversation history
+    ///           ---
+    ///           Translate the last message into: EN, ES
+    ///           Respond with JSON only: {"EN":"...","ES":"..."}
     fn spawn_translation(
         &self,
         key: usize,
@@ -103,17 +121,41 @@ impl TranslationProvider for AITranslationProvider {
             };
 
             let task = async {
+                // Build language codes from slots (e.g. ["EN", "ES"])
+                let codes: Vec<&'static str> = slots
+                    .iter()
+                    .map(|(_, lang)| deeplx_code(lang))
+                    .collect();
+
+                // Build JSON template: {"EN":"...","ES":"..."}
+                let json_template = format!(
+                    "{{{}}}",
+                    codes.iter()
+                        .map(|c| format!("\"{}\":\"...\"", c))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+
+                // Conversation history formatted as "author: message"
                 let conversation = history
                     .iter()
                     .map(|(author, msg)| format!("{}: {}", author, msg))
                     .collect::<Vec<_>>()
                     .join("\n");
 
+                // Append translation instructions after the conversation
+                let user_content = format!(
+                    "{}\n---\nTranslate the last message into: {}\nRespond with JSON only: {}",
+                    conversation,
+                    codes.join(", "),
+                    json_template,
+                );
+
                 let request = ChatRequest {
                     model,
                     messages: vec![
                         ChatMessage { role: "system".to_owned(), content: prompt },
-                        ChatMessage { role: "user".to_owned(), content: conversation },
+                        ChatMessage { role: "user".to_owned(), content: user_content },
                     ],
                 };
 
@@ -130,10 +172,12 @@ impl TranslationProvider for AITranslationProvider {
                             let content = chat_resp.choices.into_iter().next().map(|c| c.message.content);
 
                             if let Some(content) = content {
-                                match serde_json::from_str::<TranslationResult>(&content) {
+                                let json_str = extract_json(&content);
+                                match serde_json::from_str::<HashMap<String, String>>(json_str) {
                                     Ok(result) => {
                                         for (slot, language) in &slots {
-                                            let translation = extract_translation(language, &result);
+                                            let code = deeplx_code(language);
+                                            let translation = result.get(code).cloned();
                                             let _ = tx.send((key, translation, *slot)).await;
                                         }
                                     }

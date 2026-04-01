@@ -17,6 +17,6 @@ prompt = "You are the moderator of a conversation between a Human, an AI named L
 
 [translator]
 id = "Translator"
-prompt = "You are a translator. You will receive a conversation history, with each message formatted as \"author_name: message_content\". Translate ONLY the last message into English and Spanish, using the conversation context to inform your translation. Respond ONLY with valid JSON in exactly this format, with no other text: {\"english\": \"<English translation>\", \"spanish\": \"<Spanish translation>\"}"
+prompt = "You are a translator. You will receive a conversation history followed by translation instructions. Each conversation message is formatted as \"author_name: message_content\". Use the conversation context to inform your translation. Follow the translation instructions exactly and respond only with the requested JSON."
 
 
