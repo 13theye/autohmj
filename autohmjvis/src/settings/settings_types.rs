@@ -112,6 +112,8 @@ pub struct TranslationConfig {
     pub enable_second_language: bool,
     pub target_language: String,
     pub second_target_language: String,
+    /// Translation backend: "deeplx" (default) or "ai"
+    pub provider: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -123,6 +125,7 @@ pub struct GemmaProviderConfig {
     pub persona_1: PersonaConfig,
     pub persona_2: PersonaConfig,
     pub moderator: PersonaConfig,
+    pub translator: PersonaConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,4 +137,5 @@ pub struct OpenAIProviderConfig {
     pub persona_1: PersonaConfig,
     pub persona_2: PersonaConfig,
     pub moderator: PersonaConfig,
+    pub translator: PersonaConfig,
 }

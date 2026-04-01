@@ -9,5 +9,9 @@ pub use sequencer::Sequencer;
 
 pub mod translate;
 pub use translate::{
-    Translate, TranslationEvent, TranslationLanguage, TranslationLanguageSlot, TranslationService,
+    DeepLXProvider, Translate, TranslationEvent, TranslationLanguage, TranslationLanguageSlot,
+    TranslationProvider, TranslationService,
 };
+
+pub mod ai_translation;
+pub use ai_translation::AITranslationProvider;

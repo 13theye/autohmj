@@ -17,7 +17,10 @@ use autohmjvis::{
     models::{CommandMessage, HMJMessageWrapper, HumansTurn, LiveInputRegistry, Model},
     openai::OpenAIProvider,
     server::HMJServer,
-    services::{AIPersona, AIService, ConversationService, TranslationService},
+    services::{
+        AIPersona, AIService, AITranslationProvider, ConversationService, DeepLXProvider,
+        TranslationProvider, TranslationService,
+    },
     settings::{
         GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig, OscSendConfig,
         Settings, UiStateConfig, UiStateFileConfig,
@@ -70,12 +73,19 @@ fn model(app: &App) -> Model {
     // Initialize services
     let convo = ConversationService::new(&event_bus);
 
+    let translation_provider: Box<dyn TranslationProvider> =
+        match config.translation.provider.as_str() {
+            "ai" => Box::new(AITranslationProvider::new(&openai_provider_config)),
+            _ => Box::new(DeepLXProvider::default()),
+        };
+
     let translate = TranslationService::new(
         &event_bus,
         config.translation.target_language,
         config.translation.enabled,
         config.translation.second_target_language,
         config.translation.enable_second_language,
+        translation_provider,
         rthandle.clone(),
     );
 
