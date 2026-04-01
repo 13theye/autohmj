@@ -5,7 +5,6 @@ version = "1.1.0"
 edition = "2021"
 
 [dependencies]
-async-openai = { version = "0.31", features = ["byot", "responses"]}
 autohmjcommon = { path = "../autohmjcommon" }
 chrono = "0.4"
 config = "0.15"
