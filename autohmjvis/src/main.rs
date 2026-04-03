@@ -19,7 +19,7 @@ use autohmjvis::{
     server::HMJServer,
     services::{
         AIPersona, AIProvider, AIService, AITranslationProvider, ConversationService,
-        DeepLXProvider, TranslationProvider, TranslationService,
+        DeepLXProvider, GemmaTranslationProvider, TranslationProvider, TranslationService,
     },
     settings::{
         GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig, OscSendConfig,
@@ -76,6 +76,7 @@ fn model(app: &App) -> Model {
     let translation_provider: Box<dyn TranslationProvider> =
         match config.translation.provider.as_str() {
             "local_ai" => Box::new(AITranslationProvider::new(&openai_provider_config)),
+            "gemma"    => Box::new(GemmaTranslationProvider::new(&gemma_provider_config)),
             _ => Box::new(DeepLXProvider::default()),
         };
 

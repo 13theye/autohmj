@@ -134,7 +134,7 @@ impl AIProvider for GemmaProvider {
 }
 
 // Sends a REST API request to Google Gemini
-async fn generate_response(
+pub async fn generate_response(
     contents: Vec<RequestContent>,
     model: String,
     base_url: String,

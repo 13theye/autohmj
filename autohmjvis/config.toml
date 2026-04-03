@@ -78,5 +78,5 @@ enable_second_language = true
 target_language = "en"
 # Second target language
 second_target_language = "es"
-# Translation backend: "deeplx" or "local_ai"
-provider = "local_ai"
+# Translation backend: "deeplx" or "local_ai" or "gemma"
+provider = "gemma"

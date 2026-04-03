@@ -21,6 +21,7 @@ pub trait TranslationProvider: Send + Sync + 'static {
     /// `history` is the full conversation at the time of the request, including
     /// the message to translate as the last entry. Providers that use context
     /// (e.g. AI) can use it to produce more accurate translations.
+    #[allow(clippy::too_many_arguments)]
     fn spawn_translation(
         &self,
         key: usize,
@@ -136,13 +137,17 @@ impl TranslationService {
                 }
                 // Append to history before spawning so providers receive full context
                 // including the message to be translated as the last entry.
-                self.conversation_history.push((item.author.clone(), item.message.clone()));
+                self.conversation_history
+                    .push((item.author.clone(), item.message.clone()));
                 let mut slots = Vec::new();
                 if self.first_enabled && item.translation.is_none() {
                     slots.push((TranslationLanguageSlot::First, self.first_language.clone()));
                 }
                 if self.second_enabled && item.translation2.is_none() {
-                    slots.push((TranslationLanguageSlot::Second, self.second_language.clone()));
+                    slots.push((
+                        TranslationLanguageSlot::Second,
+                        self.second_language.clone(),
+                    ));
                 }
                 if !slots.is_empty() {
                     self.provider.spawn_translation(

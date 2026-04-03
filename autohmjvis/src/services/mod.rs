@@ -15,3 +15,6 @@ pub use translate::{
 
 pub mod ai_translation;
 pub use ai_translation::AITranslationProvider;
+
+pub mod gemma_translation;
+pub use gemma_translation::GemmaTranslationProvider;
