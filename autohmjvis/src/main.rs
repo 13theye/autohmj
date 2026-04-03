@@ -18,8 +18,8 @@ use autohmjvis::{
     openai::OpenAIProvider,
     server::HMJServer,
     services::{
-        AIPersona, AIService, AITranslationProvider, ConversationService, DeepLXProvider,
-        TranslationProvider, TranslationService,
+        AIPersona, AIProvider, AIService, AITranslationProvider, ConversationService,
+        DeepLXProvider, TranslationProvider, TranslationService,
     },
     settings::{
         GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig, OscSendConfig,
@@ -75,7 +75,7 @@ fn model(app: &App) -> Model {
 
     let translation_provider: Box<dyn TranslationProvider> =
         match config.translation.provider.as_str() {
-            "ai" => Box::new(AITranslationProvider::new(&openai_provider_config)),
+            "local_ai" => Box::new(AITranslationProvider::new(&openai_provider_config)),
             _ => Box::new(DeepLXProvider::default()),
         };
 
@@ -89,17 +89,31 @@ fn model(app: &App) -> Model {
         rthandle.clone(),
     );
 
+    let (ai_p1, ai_p2, ai_mod, ai_system_prompt, ai_provider): (_, _, _, _, Box<dyn AIProvider>) =
+        if config.ai_provider.local {
+            (
+                &openai_provider_config.persona_1,
+                &openai_provider_config.persona_2,
+                &openai_provider_config.moderator,
+                openai_provider_config.system_prompt.clone(),
+                Box::new(OpenAIProvider::new(&openai_provider_config)),
+            )
+        } else {
+            (
+                &gemma_provider_config.persona_1,
+                &gemma_provider_config.persona_2,
+                &gemma_provider_config.moderator,
+                gemma_provider_config.system_prompt.clone(),
+                Box::new(GemmaProvider::new(&gemma_provider_config)),
+            )
+        };
+
     let ai = AIService::new(
-        &openai_provider_config.persona_1,
-        &openai_provider_config.persona_2,
-        &openai_provider_config.moderator,
-        //&gemma_provider_config.persona_1,
-        //&gemma_provider_config.persona_2,
-        //&gemma_provider_config.moderator,
-        //gemma_provider_config.system_prompt.clone(),
-        openai_provider_config.system_prompt.clone(),
-        //Box::new(GemmaProvider::new(&gemma_provider_config)),
-        Box::new(OpenAIProvider::new(&openai_provider_config)),
+        ai_p1,
+        ai_p2,
+        ai_mod,
+        ai_system_prompt,
+        ai_provider,
         &event_bus,
         rthandle,
     );
@@ -231,18 +245,14 @@ fn model(app: &App) -> Model {
     }
 
     // Initialize three ContentManagers specific to this performance
-    let content = init_three_content_managers(
-        &event_bus,
-        &mut live_input_registry,
-        &openai_provider_config.persona_1.id,
-        &openai_provider_config.persona_2.id,
-    );
+    let content =
+        init_three_content_managers(&event_bus, &mut live_input_registry, &ai_p1.id, &ai_p2.id);
 
     // Initialize three text grids specific to this performance
     let grids = init_three_grids(
         &config.grid,
-        &openai_provider_config.persona_1.id,
-        &openai_provider_config.persona_2.id,
+        &ai_p1.id,
+        &ai_p2.id,
         &config.osc_send,
         &text_grid_fonts,
         &clock,

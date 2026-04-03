@@ -2,6 +2,11 @@
 [server]
 port = 50001
 
+[ai_provider]
+# When local is true, then uses the OpenAI API for a LMStudio-hosted model.
+# When false, uses Gemma in the cloud.
+local = false
+
 [osc_send]
 # OSC receiver's IP address (String)
 target_addr = "127.0.0.1"
@@ -73,5 +78,5 @@ enable_second_language = true
 target_language = "en"
 # Second target language
 second_target_language = "es"
-# Translation backend: "deeplx" or "ai"
-provider = "ai"
+# Translation backend: "deeplx" or "local_ai"
+provider = "local_ai"

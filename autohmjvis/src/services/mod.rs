@@ -1,5 +1,5 @@
 pub mod ai;
-pub use ai::{AIEvent, AIPersona, AIResponse, AIService};
+pub use ai::{AIEvent, AIPersona, AIProvider, AIResponse, AIService};
 
 pub mod convo;
 pub use convo::{ConversationService, ConvoEvent};

@@ -46,7 +46,7 @@ impl AIProvider for OpenAIProvider {
     ) {
         let model = self.model.clone();
 
-        let (instructions, history_str, new_item_str, previous_response_id) = match context {
+        let (instructions, history_str, new_item_str, previous_response_id, is_moderator) = match context {
             AIContext::Persona(ctx) => {
                 let history_str = ctx
                     .history
@@ -57,7 +57,7 @@ impl AIProvider for OpenAIProvider {
                 let new_item_str = ctx
                     .new_item
                     .map(|msg| format!("{}: {}", msg.author, msg.content));
-                (ctx.instructions, history_str, new_item_str, ctx.previous_response_id)
+                (ctx.instructions, history_str, new_item_str, ctx.previous_response_id, false)
             }
             AIContext::Moderator(ctx) => {
                 let history_str = ctx
@@ -66,7 +66,7 @@ impl AIProvider for OpenAIProvider {
                     .map(|msg| format!("{}: {}", msg.author, msg.content))
                     .collect::<Vec<_>>()
                     .join("\n");
-                (ctx.instructions, history_str, None, ctx.previous_response_id)
+                (ctx.instructions, history_str, None, ctx.previous_response_id, true)
             }
         };
 
@@ -87,12 +87,14 @@ impl AIProvider for OpenAIProvider {
                         instructions,
                         model,
                         prev_id,
+                        is_moderator,
                     ),
                     None => generate_stateless_request(
                         history_str,
                         new_item_str,
                         instructions,
                         model,
+                        is_moderator,
                     ),
                 };
 
@@ -179,9 +181,10 @@ fn build_request(
     content: String,
     model: String,
     previous_response_id: Option<String>,
+    is_moderator: bool,
 ) -> Result<responses::CreateResponse, Box<dyn Error + Send + Sync>> {
     let reasoning = Reasoning {
-        effort: Some(ReasoningEffort::Medium),
+        effort: Some(if is_moderator { ReasoningEffort::None } else { ReasoningEffort::Medium }),
         summary: None,
     };
 
@@ -207,9 +210,10 @@ fn generate_stateless_request(
     new_item: Option<String>,
     instructions: String,
     model: String,
+    is_moderator: bool,
 ) -> Result<responses::CreateResponse, Box<dyn Error + Send + Sync>> {
     let content = format_input(history, new_item, &instructions);
-    build_request(content, model, None)
+    build_request(content, model, None, is_moderator)
 }
 
 /// Subsequent turns: sends only messages added since the last response.
@@ -220,9 +224,10 @@ fn generate_stateful_request(
     instructions: String,
     model: String,
     previous_response_id: String,
+    is_moderator: bool,
 ) -> Result<responses::CreateResponse, Box<dyn Error + Send + Sync>> {
     let content = format_input(incremental, new_item, &instructions);
-    build_request(content, model, Some(previous_response_id))
+    build_request(content, model, Some(previous_response_id), is_moderator)
 }
 
 async fn send_response_request(

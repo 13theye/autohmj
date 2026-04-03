@@ -107,6 +107,11 @@ pub struct UiStateFileConfig {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct AIProviderConfig {
+    pub local: bool,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct TranslationConfig {
     pub enabled: bool,
     pub enable_second_language: bool,
@@ -122,6 +127,9 @@ pub struct GemmaProviderConfig {
     pub api_key: String,
     pub url: String,
     pub model: String,
+    /// Set to true for thinking models (e.g. Gemma 4). Defaults to false.
+    #[serde(default)]
+    pub thinking_model: bool,
     pub persona_1: PersonaConfig,
     pub persona_2: PersonaConfig,
     pub moderator: PersonaConfig,

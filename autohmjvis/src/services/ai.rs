@@ -120,7 +120,8 @@ impl AIService {
         rthandle: tokio::runtime::Handle,
     ) -> Self {
         let (shutdown_tx, _) = broadcast::channel(1);
-        let (instances, moderator_instance) = make_instances_from_config(persona_1, persona_2, moderator);
+        let (instances, moderator_instance) =
+            make_instances_from_config(persona_1, persona_2, moderator);
         let moderator = AIModerator::from_ai_instance(moderator_instance);
         let event_tx = events.ai.clone();
 

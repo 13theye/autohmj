@@ -16,6 +16,7 @@ pub struct GemmaProvider {
     pub api_key: String,
     pub url: String,
     pub model: String,
+    pub thinking_model: bool,
     pub client: Client,
 }
 
@@ -23,10 +24,14 @@ impl GemmaProvider {
     pub fn new(config: &GemmaProviderConfig) -> Self {
         println!("Starting GemmaProvider...");
 
+        // Gemma 3 models don't support thinkingConfig; ignore the flag for them.
+        let thinking_model = config.thinking_model && !config.model.contains("gemma-3");
+
         Self {
             api_key: config.api_key.clone(),
             url: config.url.clone(),
             model: config.model.clone(),
+            thinking_model,
             client: Client::new(),
         }
     }
@@ -44,7 +49,7 @@ impl AIProvider for GemmaProvider {
             AIContext::Persona(ctx) => {
                 let mut parts = vec![RequestContent {
                     role: "user".to_string(),
-                    parts: vec![Part { text: ctx.instructions }],
+                    parts: vec![Part { text: ctx.instructions, ..Default::default() }],
                 }];
                 for msg in &ctx.history {
                     let is_self = msg.author == ctx.persona_id;
@@ -56,7 +61,7 @@ impl AIProvider for GemmaProvider {
                     };
                     parts.push(RequestContent {
                         role: role.to_string(),
-                        parts: vec![Part { text }],
+                        parts: vec![Part { text, ..Default::default() }],
                     });
                 }
                 if let Some(new_msg) = ctx.new_item {
@@ -64,6 +69,7 @@ impl AIProvider for GemmaProvider {
                         role: "user".to_string(),
                         parts: vec![Part {
                             text: format!("{}: {}", new_msg.author, new_msg.content),
+                            ..Default::default()
                         }],
                     });
                 }
@@ -72,13 +78,14 @@ impl AIProvider for GemmaProvider {
             AIContext::Moderator(ctx) => {
                 let mut parts = vec![RequestContent {
                     role: "user".to_string(),
-                    parts: vec![Part { text: ctx.instructions }],
+                    parts: vec![Part { text: ctx.instructions, ..Default::default() }],
                 }];
                 for msg in &ctx.history {
                     parts.push(RequestContent {
                         role: "user".to_string(),
                         parts: vec![Part {
                             text: format!("{}: {}", msg.author, msg.content),
+                            ..Default::default()
                         }],
                     });
                 }
@@ -89,6 +96,7 @@ impl AIProvider for GemmaProvider {
         let api_key = self.api_key.clone();
         let model = self.model.clone();
         let url = self.url.clone();
+        let thinking_model = self.thinking_model;
 
         rthandle.spawn(async move {
             println!("Gemma async task created");
@@ -98,7 +106,7 @@ impl AIProvider for GemmaProvider {
             };
 
             let task = async {
-                match generate_response(contents, model, url, client, api_key).await {
+                match generate_response(contents, model, url, client, api_key, thinking_model).await {
                     Ok(response) => {
                         println!("Received successful response of length {}", response.len());
                         let _ = tx.send(Some(ProviderOutput { message: response, response_id: None })).await;
@@ -132,6 +140,7 @@ async fn generate_response(
     base_url: String,
     client: Client,
     api_key: String,
+    thinking_model: bool,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
     let url = format!(
         "{base_url}/{model}:generateContent?key={key}",
@@ -151,6 +160,7 @@ async fn generate_response(
             max_output_tokens: 1024,
             top_p: 0.95,
             top_k: 40,
+            thinking_config: thinking_model.then_some(ThinkingConfig { include_thoughts: true }),
         },
     };
 
@@ -159,8 +169,13 @@ async fn generate_response(
     let response: GemmaRawResponse = serde_json::from_str(&response_text)?;
 
     if let Some(candidate) = response.candidates.first() {
-        if let Some(part) = candidate.content.parts.first() {
-            return Ok(part.text.clone());
+        let answer: String = candidate.content.parts.iter()
+            .filter(|p| p.thought != Some(true))
+            .map(|p| p.text.as_str())
+            .collect::<Vec<_>>()
+            .join("");
+        if !answer.is_empty() {
+            return Ok(answer);
         }
     }
 
