@@ -24,6 +24,15 @@ pub enum AIContext {
     Moderator(ModeratorContext),
 }
 
+/// Payload returned from a provider via the instance channel.
+/// `response_id` is populated by providers that support persistent state
+/// (e.g. OpenAI Responses API); others set it to `None`.
+#[derive(Debug)]
+pub struct ProviderOutput {
+    pub message: String,
+    pub response_id: Option<String>,
+}
+
 /// Everything a provider needs to format a persona request.
 #[derive(Clone, Debug)]
 pub struct PersonaContext {
@@ -32,9 +41,14 @@ pub struct PersonaContext {
     /// The ID of the persona making this request (used to attribute model vs. user role).
     pub persona_id: String,
     /// Ordered conversation history at the time of the request.
+    /// When `previous_response_id` is set this contains only the messages added
+    /// since the last request to this persona; otherwise it contains the full history.
     pub history: Vec<ContextMessage>,
     /// Optional new message to append (not yet in `history`).
     pub new_item: Option<ContextMessage>,
+    /// ID of this persona's previous response. When `Some`, the provider should
+    /// send only the incremental history and link the request to the prior turn.
+    pub previous_response_id: Option<String>,
 }
 
 /// Everything a provider needs to format a moderator request.
@@ -42,8 +56,12 @@ pub struct PersonaContext {
 pub struct ModeratorContext {
     /// The moderator's personality prompt.
     pub instructions: String,
-    /// Full ordered conversation history.
+    /// Ordered conversation history at the time of the request.
+    /// When `previous_response_id` is set this contains only the messages added
+    /// since the last moderator request; otherwise it contains the full history.
     pub history: Vec<ContextMessage>,
+    /// ID of the moderator's previous response. Same semantics as `PersonaContext`.
+    pub previous_response_id: Option<String>,
 }
 
 /// A single conversation entry — author + text. Providers assign roles themselves.
@@ -60,7 +78,7 @@ pub trait AIProvider: Send + Sync + 'static {
     fn spawn_request(
         &self,
         context: AIContext,
-        tx: mpsc::Sender<Option<String>>,
+        tx: mpsc::Sender<Option<ProviderOutput>>,
         rthandle: &tokio::runtime::Handle,
         shutdown_rx: broadcast::Receiver<()>,
     );
@@ -102,7 +120,8 @@ impl AIService {
         rthandle: tokio::runtime::Handle,
     ) -> Self {
         let (shutdown_tx, _) = broadcast::channel(1);
-        let (instances, moderator_instance) = make_instances_from_config(persona_1, persona_2, moderator);
+        let (instances, moderator_instance) =
+            make_instances_from_config(persona_1, persona_2, moderator);
         let moderator = AIModerator::from_ai_instance(moderator_instance);
         let event_tx = events.ai.clone();
 
@@ -133,7 +152,7 @@ impl AIService {
         new_item: Option<&ConvoItem>,
         conversation: &Conversation,
     ) -> Result<(), String> {
-        let history: Vec<ContextMessage> = conversation
+        let full_history: Vec<ContextMessage> = conversation
             .values()
             .map(|item| ContextMessage {
                 author: item.author.clone(),
@@ -142,20 +161,25 @@ impl AIService {
             .collect();
 
         let (context, tx, instance_id) = if ai_persona == AIPersona::Moderator {
+            let prev_id = self.moderator.instance.last_response_id.clone();
+            let history = incremental_history(&full_history, &self.moderator.instance.id, &prev_id);
             let ctx = AIContext::Moderator(ModeratorContext {
                 instructions: self.moderator.instance.personality().to_owned(),
                 history,
+                previous_response_id: prev_id,
             });
             let tx = self.moderator.instance.tx.clone();
             let id = self.moderator.instance.id.clone();
             (ctx, tx, id)
         } else {
-            let Some(instance) = self.instances.get(&ai_persona) else {
+            let Some(instance) = self.instances.get_mut(&ai_persona) else {
                 return Err(format!(
                     "No AI instance found for persona: {:?}",
                     ai_persona
                 ));
             };
+            let prev_id = instance.last_response_id.clone();
+            let history = incremental_history(&full_history, &instance.id, &prev_id);
             let instructions = format!(
                 "{} Personality: {}",
                 self.system_prompt,
@@ -170,6 +194,7 @@ impl AIService {
                 persona_id: instance.id.clone(),
                 history,
                 new_item,
+                previous_response_id: prev_id,
             });
             let tx = instance.tx.clone();
             let id = instance.id.clone();
@@ -190,7 +215,9 @@ impl AIService {
     pub fn receive_all(&mut self) {
         // Receive from moderator
         match self.moderator.instance.rx.try_recv() {
-            Ok(Some(message)) => {
+            Ok(Some(output)) => {
+                self.moderator.instance.last_response_id = output.response_id;
+                let message = output.message;
                 println!("Received response from moderator: {:#?}", message);
                 if message.contains("Human") {
                     let _ = self
@@ -219,7 +246,9 @@ impl AIService {
         // Collect responses from all AI instances
         for instance in self.instances.values_mut() {
             match instance.rx.try_recv() {
-                Ok(Some(message)) => {
+                Ok(Some(output)) => {
+                    instance.last_response_id = output.response_id;
+                    let message = output.message;
                     println!("Received response from Ai instance: {:#?}", message);
 
                     let _ = self.event_tx.send(AIEvent::AIReceived(AIResponse {
@@ -233,6 +262,16 @@ impl AIService {
                 Err(_) => {}
             }
         }
+    }
+
+    /// Clear all stored response IDs.
+    /// Call this when the conversation is reset so the next request sends
+    /// full history again rather than an incremental slice.
+    pub fn reset_response_ids(&mut self) {
+        for instance in self.instances.values_mut() {
+            instance.last_response_id = None;
+        }
+        self.moderator.instance.last_response_id = None;
     }
 
     pub fn add(&mut self, persona: AIPersona, instance: AIInstance) {
@@ -255,13 +294,16 @@ impl Drop for AIService {
 
 // ===== Instance =====
 
-/// A single AI persona instance — holds personality and channels.
+/// A single AI persona instance — holds personality, channels, and stateful request tracking.
 #[derive(Debug)]
 pub struct AIInstance {
     pub id: String,
     personality: Personality,
-    pub tx: mpsc::Sender<Option<String>>,
-    pub rx: mpsc::Receiver<Option<String>>,
+    pub tx: mpsc::Sender<Option<ProviderOutput>>,
+    pub rx: mpsc::Receiver<Option<ProviderOutput>>,
+    /// The `id` from the most recent response. Used as `previous_response_id`
+    /// on the next request to enable stateful multi-turn conversations.
+    pub last_response_id: Option<String>,
 }
 
 impl AIInstance {
@@ -272,6 +314,7 @@ impl AIInstance {
             personality,
             tx,
             rx,
+            last_response_id: None,
         }
     }
 
@@ -362,4 +405,27 @@ pub fn make_instances_from_config(
     println!("Moderator ID: {:?}", moderator_instance.id);
 
     (personas, moderator_instance)
+}
+
+/// Returns the slice of `history` that the server does not already have.
+///
+/// When `previous_response_id` is `Some`, the server's stored context ends at
+/// this persona's last response. We find that response's position and return
+/// everything after it — the messages from other participants the server hasn't
+/// seen. If no prior response is found or `previous_response_id` is `None`,
+/// the full history is returned (first turn or post-reset).
+fn incremental_history(
+    history: &[ContextMessage],
+    persona_id: &str,
+    previous_response_id: &Option<String>,
+) -> Vec<ContextMessage> {
+    if previous_response_id.is_none() {
+        return history.to_vec();
+    }
+    let start = history
+        .iter()
+        .rposition(|m| m.author == persona_id)
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    history[start..].to_vec()
 }

@@ -9,6 +9,31 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::events::{ConvoEvent, HMJEventBus};
 
+// ===== Provider trait =====
+
+/// Interface between TranslationService and a specific translation backend.
+/// Mirrors the AIProvider pattern — implementors spawn async tasks and send
+/// results back through `tx`.
+pub trait TranslationProvider: Send + Sync + 'static {
+    /// Spawn async task(s) that produce one `(key, translation, slot)` result
+    /// per entry in `slots`, sent through `tx`.
+    ///
+    /// `history` is the full conversation at the time of the request, including
+    /// the message to translate as the last entry. Providers that use context
+    /// (e.g. AI) can use it to produce more accurate translations.
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_translation(
+        &self,
+        key: usize,
+        msg: String,
+        history: Vec<(String, String)>,
+        slots: Vec<(TranslationLanguageSlot, TranslationLanguage)>,
+        tx: mpsc::Sender<(usize, Option<String>, TranslationLanguageSlot)>,
+        rthandle: &tokio::runtime::Handle,
+        shutdown_rx: broadcast::Receiver<()>,
+    );
+}
+
 // Event interface
 #[derive(Clone, Debug)]
 pub enum TranslationEvent {
@@ -28,7 +53,10 @@ pub enum TranslationLanguageSlot {
 
 // Controller module for translations
 pub struct TranslationService {
-    translate: Arc<Translate>, // Translation API entry point
+    provider: Box<dyn TranslationProvider>, // Translation backend
+
+    // Conversation history accumulated for context-aware providers
+    conversation_history: Vec<(String, String)>, // (author, message)
 
     // First language slot
     pub first_language: TranslationLanguage,
@@ -60,6 +88,7 @@ impl TranslationService {
         first_enabled: bool,
         second_lang_code: String,
         second_enabled: bool,
+        provider: Box<dyn TranslationProvider>,
         rthandle: tokio::runtime::Handle,
     ) -> Self {
         let event_tx = events.translation.clone();
@@ -79,7 +108,8 @@ impl TranslationService {
         );
 
         Self {
-            translate: Arc::new(Translate::default()),
+            provider,
+            conversation_history: Vec::new(),
             first_language,
             first_enabled,
             second_language,
@@ -98,67 +128,40 @@ impl TranslationService {
         self.receive_translations();
     }
 
-    // Listen for new ConvoItems and spawn a translation task for each enabled language slot.
+    // Listen for new ConvoItems and collect enabled slots, then delegate to the provider.
     fn process_events(&mut self) {
         while let Ok(event) = self.history_rx.try_recv() {
             if let ConvoEvent::ItemAdded(key, item) = event {
                 if item.message.trim().is_empty() {
                     continue;
                 }
+                // Append to history before spawning so providers receive full context
+                // including the message to be translated as the last entry.
+                self.conversation_history
+                    .push((item.author.clone(), item.message.clone()));
+                let mut slots = Vec::new();
                 if self.first_enabled && item.translation.is_none() {
-                    self.request_translation(
-                        key,
-                        item.message.clone(),
-                        self.translate.clone(),
-                        self.first_language.clone(),
-                        TranslationLanguageSlot::First,
-                    );
+                    slots.push((TranslationLanguageSlot::First, self.first_language.clone()));
                 }
                 if self.second_enabled && item.translation2.is_none() {
-                    self.request_translation(
+                    slots.push((
+                        TranslationLanguageSlot::Second,
+                        self.second_language.clone(),
+                    ));
+                }
+                if !slots.is_empty() {
+                    self.provider.spawn_translation(
                         key,
                         item.message.clone(),
-                        self.translate.clone(),
-                        self.second_language.clone(),
-                        TranslationLanguageSlot::Second,
+                        self.conversation_history.clone(),
+                        slots,
+                        self.translation_tx.clone(),
+                        &self.rthandle,
+                        self.shutdown_tx.subscribe(),
                     );
                 }
             }
         }
-    }
-
-    // Spawns a new async task to translate the message for the given language slot.
-    fn request_translation(
-        &mut self,
-        key: usize,
-        msg: String,
-        translate: Arc<Translate>,
-        translation_type: TranslationLanguage,
-        slot: TranslationLanguageSlot,
-    ) {
-        let tx = self.translation_tx.clone();
-        let mut shutdown_rx = self.shutdown_tx.subscribe();
-        self.rthandle.spawn(async move {
-            let shutdown = async {
-                let _ = shutdown_rx.recv().await;
-            };
-
-            let task = async {
-                let (translation, source) = translate
-                    .get_translation(&msg, "auto", translation_type.code(), slot)
-                    .await;
-                let _ = tx.send((key, translation, source)).await;
-            };
-
-            tokio::select! {
-                _ = shutdown => {
-                    println!(".....Translation task received shutdown signal");
-                }
-                _ = task => {
-                    println!("Translation task completed normally")
-                }
-            }
-        });
     }
 
     // Receive completed translations and emit TranslationEvent::ItemTranslated.
@@ -198,6 +201,62 @@ impl Drop for TranslationService {
         self.shutdown();
         // Wait briefly
         std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+// ===== DeepLX provider =====
+
+/// Translation backend that uses the DeepLX API.
+/// Spawns one async task per language slot (preserving the original behavior).
+pub struct DeepLXProvider {
+    translate: Arc<Translate>,
+}
+
+impl Default for DeepLXProvider {
+    fn default() -> Self {
+        Self {
+            translate: Arc::new(Translate::default()),
+        }
+    }
+}
+
+impl TranslationProvider for DeepLXProvider {
+    fn spawn_translation(
+        &self,
+        key: usize,
+        msg: String,
+        _history: Vec<(String, String)>,
+        slots: Vec<(TranslationLanguageSlot, TranslationLanguage)>,
+        tx: mpsc::Sender<(usize, Option<String>, TranslationLanguageSlot)>,
+        rthandle: &tokio::runtime::Handle,
+        shutdown_rx: broadcast::Receiver<()>,
+    ) {
+        for (slot, language) in slots {
+            let translate = self.translate.clone();
+            let tx = tx.clone();
+            let msg = msg.clone();
+            let mut task_shutdown_rx = shutdown_rx.resubscribe();
+
+            rthandle.spawn(async move {
+                let shutdown = async {
+                    let _ = task_shutdown_rx.recv().await;
+                };
+                let task = async {
+                    let (translation, source) = translate
+                        .get_translation(&msg, "auto", language.code(), slot)
+                        .await;
+                    let _ = tx.send((key, translation, source)).await;
+                };
+                tokio::select! {
+                    _ = shutdown => {
+                        println!(".....Translation task received shutdown signal");
+                    }
+                    _ = task => {
+                        println!("Translation task completed normally");
+                    }
+                }
+            });
+        }
     }
 }
 

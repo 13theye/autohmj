@@ -101,9 +101,34 @@ impl Default for HumanColorConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AiColorConfig {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+impl Default for AiColorConfig {
+    fn default() -> Self {
+        Self {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 1.0,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct UiStateFileConfig {
     pub human_color: HumanColorConfig,
+    pub ai_color: AiColorConfig,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AIProviderConfig {
+    pub local: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,6 +137,8 @@ pub struct TranslationConfig {
     pub enable_second_language: bool,
     pub target_language: String,
     pub second_target_language: String,
+    /// Translation backend: "deeplx" (default) or "ai"
+    pub provider: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -120,9 +147,13 @@ pub struct GemmaProviderConfig {
     pub api_key: String,
     pub url: String,
     pub model: String,
+    /// Set to true for thinking models (e.g. Gemma 4). Defaults to false.
+    #[serde(default)]
+    pub thinking_model: bool,
     pub persona_1: PersonaConfig,
     pub persona_2: PersonaConfig,
     pub moderator: PersonaConfig,
+    pub translator: PersonaConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,4 +165,5 @@ pub struct OpenAIProviderConfig {
     pub persona_1: PersonaConfig,
     pub persona_2: PersonaConfig,
     pub moderator: PersonaConfig,
+    pub translator: PersonaConfig,
 }

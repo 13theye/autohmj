@@ -1,5 +1,5 @@
 pub mod ai;
-pub use ai::{AIEvent, AIPersona, AIResponse, AIService};
+pub use ai::{AIEvent, AIPersona, AIProvider, AIResponse, AIService};
 
 pub mod convo;
 pub use convo::{ConversationService, ConvoEvent};
@@ -9,5 +9,12 @@ pub use sequencer::Sequencer;
 
 pub mod translate;
 pub use translate::{
-    Translate, TranslationEvent, TranslationLanguage, TranslationLanguageSlot, TranslationService,
+    DeepLXProvider, Translate, TranslationEvent, TranslationLanguage, TranslationLanguageSlot,
+    TranslationProvider, TranslationService,
 };
+
+pub mod ai_translation;
+pub use ai_translation::AITranslationProvider;
+
+pub mod gemma_translation;
+pub use gemma_translation::GemmaTranslationProvider;

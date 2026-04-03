@@ -22,6 +22,7 @@ pub struct Settings {
     pub server: ServerConfig,
     pub tempo: TempoConfig,
     pub translation: TranslationConfig,
+    pub ai_provider: AIProviderConfig,
 }
 
 #[derive(Debug, Deserialize)]

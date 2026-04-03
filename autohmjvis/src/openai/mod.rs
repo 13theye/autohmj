@@ -5,7 +5,7 @@
 pub mod types;
 
 use crate::openai::types::response::{MessageContent, OutputItem, ResponseObject};
-use crate::services::ai::{AIContext, AIProvider};
+use crate::services::ai::{AIContext, AIProvider, ProviderOutput};
 use crate::settings::OpenAIProviderConfig;
 
 use async_openai::{
@@ -40,31 +40,33 @@ impl AIProvider for OpenAIProvider {
     fn spawn_request(
         &self,
         context: AIContext,
-        tx: mpsc::Sender<Option<String>>,
+        tx: mpsc::Sender<Option<ProviderOutput>>,
         rthandle: &tokio::runtime::Handle,
         mut shutdown_rx: broadcast::Receiver<()>,
     ) {
         let model = self.model.clone();
 
-        let (instructions, input) = match context {
+        let (instructions, history_str, new_item_str, previous_response_id, is_moderator) = match context {
             AIContext::Persona(ctx) => {
-                let mut lines: Vec<String> = ctx
+                let history_str = ctx
                     .history
                     .iter()
                     .map(|msg| format!("{}: {}", msg.author, msg.content))
-                    .collect();
-                if let Some(new_msg) = ctx.new_item {
-                    lines.push(format!("{}: {}", new_msg.author, new_msg.content));
-                }
-                (Some(ctx.instructions), lines.join("\n"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let new_item_str = ctx
+                    .new_item
+                    .map(|msg| format!("{}: {}", msg.author, msg.content));
+                (ctx.instructions, history_str, new_item_str, ctx.previous_response_id, false)
             }
             AIContext::Moderator(ctx) => {
-                let lines: Vec<String> = ctx
+                let history_str = ctx
                     .history
                     .iter()
                     .map(|msg| format!("{}: {}", msg.author, msg.content))
-                    .collect();
-                (Some(ctx.instructions), lines.join("\n"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (ctx.instructions, history_str, None, ctx.previous_response_id, true)
             }
         };
 
@@ -78,7 +80,25 @@ impl AIProvider for OpenAIProvider {
             };
 
             let task = async {
-                let request = match generate_request(input, instructions, model) {
+                let request_result = match previous_response_id {
+                    Some(prev_id) => generate_stateful_request(
+                        history_str,
+                        new_item_str,
+                        instructions,
+                        model,
+                        prev_id,
+                        is_moderator,
+                    ),
+                    None => generate_stateless_request(
+                        history_str,
+                        new_item_str,
+                        instructions,
+                        model,
+                        is_moderator,
+                    ),
+                };
+
+                let request = match request_result {
                     Ok(r) => r,
                     Err(e) => {
                         eprintln!("OpenAIProvider: Failed to generate request: {}", e);
@@ -110,7 +130,17 @@ impl AIProvider for OpenAIProvider {
                             }
                         });
 
-                        let _ = tx.send(message).await;
+                        match message {
+                            Some(message) => {
+                                let _ = tx.send(Some(ProviderOutput {
+                                    message,
+                                    response_id: Some(response.id.clone()),
+                                })).await;
+                            }
+                            None => {
+                                let _ = tx.send(None).await;
+                            }
+                        }
                     }
                     Err(e) => {
                         eprintln!("OpenAIProvider: API error: {}", e);
@@ -131,25 +161,31 @@ impl AIProvider for OpenAIProvider {
     }
 }
 
-/// Builds a Responses API request object.
-///
-/// Instructions are appended to the input field for compatibility with
-/// local inference servers (e.g. LMStudio) that do not support the
-/// top-level `instructions` field.
-fn generate_request(
+/// Combines history and optional new item into a single input string,
+/// appending the instructions for compatibility with local inference servers
+/// that do not support the top-level `instructions` field.
+fn format_input(history: String, new_item: Option<String>, instructions: &str) -> String {
+    let mut input = history;
+    if let Some(item) = new_item {
+        if !input.is_empty() {
+            input.push('\n');
+        }
+        input.push_str(&item);
+    }
+    format!("input : {}\ninstructions : {}", input, instructions)
+}
+
+/// Shared low-level builder. Sets reasoning config, disables streaming,
+/// and optionally links to a previous response for stateful conversations.
+fn build_request(
     content: String,
-    prompt: Option<String>,
     model: String,
+    previous_response_id: Option<String>,
+    is_moderator: bool,
 ) -> Result<responses::CreateResponse, Box<dyn Error + Send + Sync>> {
     let reasoning = Reasoning {
-        effort: Some(ReasoningEffort::Medium),
+        effort: Some(if is_moderator { ReasoningEffort::None } else { ReasoningEffort::Medium }),
         summary: None,
-    };
-
-    let content = if let Some(prompt) = prompt {
-        format!("input : {}\ninstructions : {}", content, prompt)
-    } else {
-        format!("input : {}", content)
     };
 
     let mut request = responses::CreateResponseArgs::default()
@@ -158,12 +194,40 @@ fn generate_request(
         .reasoning(reasoning)
         .build()?;
 
+    request.previous_response_id = previous_response_id;
     // Streaming is not currently used but kept here for future use.
     request.stream = Some(false);
 
     println!("OpenAIProvider: Request object:\n{:#?}", request);
 
     Ok(request)
+}
+
+/// First turn or post-reset: sends the full conversation history.
+/// No `previous_response_id` — the server has no prior context.
+fn generate_stateless_request(
+    history: String,
+    new_item: Option<String>,
+    instructions: String,
+    model: String,
+    is_moderator: bool,
+) -> Result<responses::CreateResponse, Box<dyn Error + Send + Sync>> {
+    let content = format_input(history, new_item, &instructions);
+    build_request(content, model, None, is_moderator)
+}
+
+/// Subsequent turns: sends only messages added since the last response.
+/// Includes `previous_response_id` so the server can link to its prior context.
+fn generate_stateful_request(
+    incremental: String,
+    new_item: Option<String>,
+    instructions: String,
+    model: String,
+    previous_response_id: String,
+    is_moderator: bool,
+) -> Result<responses::CreateResponse, Box<dyn Error + Send + Sync>> {
+    let content = format_input(incremental, new_item, &instructions);
+    build_request(content, model, Some(previous_response_id), is_moderator)
 }
 
 async fn send_response_request(

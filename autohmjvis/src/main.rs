@@ -17,10 +17,13 @@ use autohmjvis::{
     models::{CommandMessage, HMJMessageWrapper, HumansTurn, LiveInputRegistry, Model},
     openai::OpenAIProvider,
     server::HMJServer,
-    services::{AIPersona, AIService, ConversationService, TranslationService},
+    services::{
+        AIPersona, AIProvider, AIService, AITranslationProvider, ConversationService,
+        DeepLXProvider, GemmaTranslationProvider, TranslationProvider, TranslationService,
+    },
     settings::{
-        GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig, OscSendConfig,
-        Settings, UiStateConfig, UiStateFileConfig,
+        AiColorConfig, GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig,
+        OscSendConfig, Settings, UiStateConfig, UiStateFileConfig,
     },
     ui::control_panel::ControlPanel,
     views::{BackgroundManager, TextGrid, TextGridFonts, TextGridPosition},
@@ -70,26 +73,48 @@ fn model(app: &App) -> Model {
     // Initialize services
     let convo = ConversationService::new(&event_bus);
 
+    let translation_provider: Box<dyn TranslationProvider> =
+        match config.translation.provider.as_str() {
+            "local_ai" => Box::new(AITranslationProvider::new(&openai_provider_config)),
+            "gemma"    => Box::new(GemmaTranslationProvider::new(&gemma_provider_config)),
+            _ => Box::new(DeepLXProvider::default()),
+        };
+
     let translate = TranslationService::new(
         &event_bus,
         config.translation.target_language,
         config.translation.enabled,
         config.translation.second_target_language,
         config.translation.enable_second_language,
+        translation_provider,
         rthandle.clone(),
     );
 
+    let (ai_p1, ai_p2, ai_mod, ai_system_prompt, ai_provider): (_, _, _, _, Box<dyn AIProvider>) =
+        if config.ai_provider.local {
+            (
+                &openai_provider_config.persona_1,
+                &openai_provider_config.persona_2,
+                &openai_provider_config.moderator,
+                openai_provider_config.system_prompt.clone(),
+                Box::new(OpenAIProvider::new(&openai_provider_config)),
+            )
+        } else {
+            (
+                &gemma_provider_config.persona_1,
+                &gemma_provider_config.persona_2,
+                &gemma_provider_config.moderator,
+                gemma_provider_config.system_prompt.clone(),
+                Box::new(GemmaProvider::new(&gemma_provider_config)),
+            )
+        };
+
     let ai = AIService::new(
-        &openai_provider_config.persona_1,
-        &openai_provider_config.persona_2,
-        &openai_provider_config.moderator,
-        //&gemma_provider_config.persona_1,
-        //&gemma_provider_config.persona_2,
-        //&gemma_provider_config.moderator,
-        //gemma_provider_config.system_prompt.clone(),
-        openai_provider_config.system_prompt.clone(),
-        //Box::new(GemmaProvider::new(&gemma_provider_config)),
-        Box::new(OpenAIProvider::new(&openai_provider_config)),
+        ai_p1,
+        ai_p2,
+        ai_mod,
+        ai_system_prompt,
+        ai_provider,
         &event_bus,
         rthandle,
     );
@@ -221,18 +246,14 @@ fn model(app: &App) -> Model {
     }
 
     // Initialize three ContentManagers specific to this performance
-    let content = init_three_content_managers(
-        &event_bus,
-        &mut live_input_registry,
-        &openai_provider_config.persona_1.id,
-        &openai_provider_config.persona_2.id,
-    );
+    let content =
+        init_three_content_managers(&event_bus, &mut live_input_registry, &ai_p1.id, &ai_p2.id);
 
     // Initialize three text grids specific to this performance
     let grids = init_three_grids(
         &config.grid,
-        &openai_provider_config.persona_1.id,
-        &openai_provider_config.persona_2.id,
+        &ai_p1.id,
+        &ai_p2.id,
         &config.osc_send,
         &text_grid_fonts,
         &clock,
@@ -374,7 +395,53 @@ fn update_control_panel(model: &mut Model, update: Update) {
                                 .text("A"),
                             )
                             .changed();
-                        if r_changed || g_changed || b_changed || a_changed {
+                        ui.add_space(4.0);
+                        ui.label("AI");
+                        let ai_r_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.ai_color[0],
+                                    0.0..=1.0,
+                                )
+                                .text("R"),
+                            )
+                            .changed();
+                        let ai_g_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.ai_color[1],
+                                    0.0..=1.0,
+                                )
+                                .text("G"),
+                            )
+                            .changed();
+                        let ai_b_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.ai_color[2],
+                                    0.0..=1.0,
+                                )
+                                .text("B"),
+                            )
+                            .changed();
+                        let ai_a_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.ai_color[3],
+                                    0.0..=1.0,
+                                )
+                                .text("A"),
+                            )
+                            .changed();
+                        if r_changed
+                            || g_changed
+                            || b_changed
+                            || a_changed
+                            || ai_r_changed
+                            || ai_g_changed
+                            || ai_b_changed
+                            || ai_a_changed
+                        {
                             model.control_panel.save_status =
                                 Some("Unsaved changes...".to_string());
                         }
@@ -382,8 +449,15 @@ fn update_control_panel(model: &mut Model, update: Update) {
                         ui.horizontal(|ui| {
                             if ui.button("Save").clicked() {
                                 let [r, g, b, a] = model.control_panel.human_color;
+                                let [ai_r, ai_g, ai_b, ai_a] = model.control_panel.ai_color;
                                 let config = UiStateFileConfig {
                                     human_color: HumanColorConfig { r, g, b, a },
+                                    ai_color: AiColorConfig {
+                                        r: ai_r,
+                                        g: ai_g,
+                                        b: ai_b,
+                                        a: ai_a,
+                                    },
                                 };
                                 match UiStateConfig::save(&config) {
                                     Ok(()) => {
@@ -399,7 +473,9 @@ fn update_control_panel(model: &mut Model, update: Update) {
                             if ui.button("Revert").clicked() {
                                 let loaded = UiStateConfig::load();
                                 let c = loaded.human_color;
+                                let ai = loaded.ai_color;
                                 model.control_panel.human_color = [c.r, c.g, c.b, c.a];
+                                model.control_panel.ai_color = [ai.r, ai.g, ai.b, ai.a];
                                 model.control_panel.save_status =
                                     Some("Reverted changes.".to_string());
                             }
@@ -414,6 +490,14 @@ fn update_control_panel(model: &mut Model, update: Update) {
     let [r, g, b, a] = model.control_panel.human_color;
     if let Some(grid) = model.grids.iter_mut().find(|g| g.id == "Human") {
         grid.text_style.cell_bgcolor = rgba(r, g, b, a);
+    }
+
+    // Always apply color to AI grids (even when panel is hidden)
+    let [r, g, b, a] = model.control_panel.ai_color;
+    for id in &["Left", "Right"] {
+        if let Some(grid) = model.grids.iter_mut().find(|g| g.id == *id) {
+            grid.text_style.cell_bgcolor = rgba(r, g, b, a);
+        }
     }
 }
 
@@ -743,6 +827,7 @@ fn receive_hmjmessage(model: &mut Model) {
                 }
                 CommandMessage::ResetConversation => {
                     model.convo.reset();
+                    model.ai.reset_response_ids();
                     for grid in model.grids.iter_mut() {
                         grid.clear();
                     }

@@ -26,6 +26,8 @@ pub struct GenerationConfig {
     pub max_output_tokens: u32,
     pub top_p: f32,
     pub top_k: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking_config: Option<ThinkingConfig>,
 }
 
 // Request content as defined by Gemini API
@@ -36,9 +38,19 @@ pub struct RequestContent {
 }
 
 // Part of the content as defined by Gemini API
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Part {
     pub text: String,
+    /// True for thinking/reasoning parts (Gemma 4 thinking models).
+    /// Absent (None) for regular answer parts and all Gemma 3 responses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thought: Option<bool>,
+}
+
+// Thinking configuration for thinking models (e.g. Gemma 4)
+#[derive(Debug, Serialize)]
+pub struct ThinkingConfig {
+    pub include_thoughts: bool,
 }
 
 // The Gemma raw response as defined by Gemini API
