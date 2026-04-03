@@ -22,8 +22,8 @@ use autohmjvis::{
         DeepLXProvider, GemmaTranslationProvider, TranslationProvider, TranslationService,
     },
     settings::{
-        GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig, OscSendConfig,
-        Settings, UiStateConfig, UiStateFileConfig,
+        AiColorConfig, GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig,
+        OscSendConfig, Settings, UiStateConfig, UiStateFileConfig,
     },
     ui::control_panel::ControlPanel,
     views::{BackgroundManager, TextGrid, TextGridFonts, TextGridPosition},
@@ -395,7 +395,53 @@ fn update_control_panel(model: &mut Model, update: Update) {
                                 .text("A"),
                             )
                             .changed();
-                        if r_changed || g_changed || b_changed || a_changed {
+                        ui.add_space(4.0);
+                        ui.label("AI");
+                        let ai_r_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.ai_color[0],
+                                    0.0..=1.0,
+                                )
+                                .text("R"),
+                            )
+                            .changed();
+                        let ai_g_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.ai_color[1],
+                                    0.0..=1.0,
+                                )
+                                .text("G"),
+                            )
+                            .changed();
+                        let ai_b_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.ai_color[2],
+                                    0.0..=1.0,
+                                )
+                                .text("B"),
+                            )
+                            .changed();
+                        let ai_a_changed = ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut model.control_panel.ai_color[3],
+                                    0.0..=1.0,
+                                )
+                                .text("A"),
+                            )
+                            .changed();
+                        if r_changed
+                            || g_changed
+                            || b_changed
+                            || a_changed
+                            || ai_r_changed
+                            || ai_g_changed
+                            || ai_b_changed
+                            || ai_a_changed
+                        {
                             model.control_panel.save_status =
                                 Some("Unsaved changes...".to_string());
                         }
@@ -403,8 +449,15 @@ fn update_control_panel(model: &mut Model, update: Update) {
                         ui.horizontal(|ui| {
                             if ui.button("Save").clicked() {
                                 let [r, g, b, a] = model.control_panel.human_color;
+                                let [ai_r, ai_g, ai_b, ai_a] = model.control_panel.ai_color;
                                 let config = UiStateFileConfig {
                                     human_color: HumanColorConfig { r, g, b, a },
+                                    ai_color: AiColorConfig {
+                                        r: ai_r,
+                                        g: ai_g,
+                                        b: ai_b,
+                                        a: ai_a,
+                                    },
                                 };
                                 match UiStateConfig::save(&config) {
                                     Ok(()) => {
@@ -420,7 +473,9 @@ fn update_control_panel(model: &mut Model, update: Update) {
                             if ui.button("Revert").clicked() {
                                 let loaded = UiStateConfig::load();
                                 let c = loaded.human_color;
+                                let ai = loaded.ai_color;
                                 model.control_panel.human_color = [c.r, c.g, c.b, c.a];
+                                model.control_panel.ai_color = [ai.r, ai.g, ai.b, ai.a];
                                 model.control_panel.save_status =
                                     Some("Reverted changes.".to_string());
                             }
@@ -435,6 +490,14 @@ fn update_control_panel(model: &mut Model, update: Update) {
     let [r, g, b, a] = model.control_panel.human_color;
     if let Some(grid) = model.grids.iter_mut().find(|g| g.id == "Human") {
         grid.text_style.cell_bgcolor = rgba(r, g, b, a);
+    }
+
+    // Always apply color to AI grids (even when panel is hidden)
+    let [r, g, b, a] = model.control_panel.ai_color;
+    for id in &["Left", "Right"] {
+        if let Some(grid) = model.grids.iter_mut().find(|g| g.id == *id) {
+            grid.text_style.cell_bgcolor = rgba(r, g, b, a);
+        }
     }
 }
 
