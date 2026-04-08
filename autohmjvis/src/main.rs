@@ -75,9 +75,18 @@ fn model(app: &App) -> Model {
 
     let translation_provider: Box<dyn TranslationProvider> =
         match config.translation.provider.as_str() {
-            "local_ai" => Box::new(AITranslationProvider::new(&openai_provider_config)),
-            "gemma"    => Box::new(GemmaTranslationProvider::new(&gemma_provider_config)),
-            _ => Box::new(DeepLXProvider::default()),
+            "local_ai" => {
+                println!("Using local OpenAI API translation provider");
+                Box::new(AITranslationProvider::new(&openai_provider_config))
+            }
+            "gemma" => {
+                println!("Using Gemma translation provider");
+                Box::new(GemmaTranslationProvider::new(&gemma_provider_config))
+            }
+            _ => {
+                println!("Using DeepL translation provider");
+                Box::new(DeepLXProvider::default())
+            }
         };
 
     let translate = TranslationService::new(
@@ -399,38 +408,26 @@ fn update_control_panel(model: &mut Model, update: Update) {
                         ui.label("AI");
                         let ai_r_changed = ui
                             .add(
-                                egui::Slider::new(
-                                    &mut model.control_panel.ai_color[0],
-                                    0.0..=1.0,
-                                )
-                                .text("R"),
+                                egui::Slider::new(&mut model.control_panel.ai_color[0], 0.0..=1.0)
+                                    .text("R"),
                             )
                             .changed();
                         let ai_g_changed = ui
                             .add(
-                                egui::Slider::new(
-                                    &mut model.control_panel.ai_color[1],
-                                    0.0..=1.0,
-                                )
-                                .text("G"),
+                                egui::Slider::new(&mut model.control_panel.ai_color[1], 0.0..=1.0)
+                                    .text("G"),
                             )
                             .changed();
                         let ai_b_changed = ui
                             .add(
-                                egui::Slider::new(
-                                    &mut model.control_panel.ai_color[2],
-                                    0.0..=1.0,
-                                )
-                                .text("B"),
+                                egui::Slider::new(&mut model.control_panel.ai_color[2], 0.0..=1.0)
+                                    .text("B"),
                             )
                             .changed();
                         let ai_a_changed = ui
                             .add(
-                                egui::Slider::new(
-                                    &mut model.control_panel.ai_color[3],
-                                    0.0..=1.0,
-                                )
-                                .text("A"),
+                                egui::Slider::new(&mut model.control_panel.ai_color[3], 0.0..=1.0)
+                                    .text("A"),
                             )
                             .changed();
                         if r_changed

@@ -19,6 +19,6 @@ prompt = "You are the moderator of a conversation between a Human, an AI named L
 
 [translator]
 id = "Translator"
-prompt = "You are a translator. You will receive a conversation history followed by translation instructions. Each conversation message is formatted as \"author_name: message_content\". Use the conversation context to inform your translation. Follow the translation instructions exactly and respond only with the requested JSON."
+prompt = "You are a translator. You will receive a conversation history followed by translation instructions. Each conversation message is formatted as \"author_name: message_content\". Use the conversation context to inform your translation, especially on things like subject pronouns that are often omitted in some languages. Prefer a natural-sounding translation to a literal translation. Special translations: \"태싯\" = \"Tacit\". Follow the translation instructions exactly and respond only with the requested JSON."
 
 

@@ -278,6 +278,53 @@ impl TranslationLanguage {
             TranslationLanguage::Spanish => "es",
         }
     }
+
+    /// Returns the uppercase DeepL-style language code used in AI translation
+    /// requests (e.g. "EN", "ES", "FR", "KO").
+    pub fn deeplx_code(&self) -> &'static str {
+        match self {
+            TranslationLanguage::English => "EN",
+            TranslationLanguage::Spanish => "ES",
+            TranslationLanguage::French => "FR",
+            TranslationLanguage::Korean => "KO",
+        }
+    }
+}
+
+// ===== Shared AI provider utilities =====
+
+/// Builds the list of uppercase DeepL-style language codes from a slot list.
+pub(crate) fn build_lang_codes(slots: &[(TranslationLanguageSlot, TranslationLanguage)]) -> Vec<&'static str> {
+    slots.iter().map(|(_, lang)| lang.deeplx_code()).collect()
+}
+
+/// Builds the JSON response template string from a list of language codes,
+/// e.g. `{"EN":"...","ES":"..."}`.
+pub(crate) fn build_json_template(codes: &[&'static str]) -> String {
+    format!(
+        "{{{}}}",
+        codes.iter()
+            .map(|c| format!("\"{}\":\"...\"", c))
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+/// Formats a conversation history as "author: message" lines joined by newlines.
+pub(crate) fn format_history(history: &[(String, String)]) -> String {
+    history
+        .iter()
+        .map(|(author, msg)| format!("{}: {}", author, msg))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Extracts the JSON object substring from a model response, stripping any
+/// surrounding markdown code fences or whitespace the model may have added.
+pub(crate) fn extract_json(s: &str) -> &str {
+    let start = s.find('{').unwrap_or(0);
+    let end = s.rfind('}').map(|i| i + 1).unwrap_or(s.len());
+    &s[start..end]
 }
 
 impl<T> From<T> for TranslationLanguage

@@ -14,7 +14,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 
-use crate::services::translate::{TranslationLanguage, TranslationLanguageSlot, TranslationProvider};
+use crate::services::translate::{
+    build_json_template, build_lang_codes, extract_json, format_history, TranslationLanguage,
+    TranslationLanguageSlot, TranslationProvider,
+};
 use crate::settings::OpenAIProviderConfig;
 
 pub struct AITranslationProvider {
@@ -62,27 +65,6 @@ struct ChatChoice {
     message: ChatMessage,
 }
 
-// ===== Helpers =====
-
-/// Returns the uppercase DeepL-style language code for a TranslationLanguage.
-/// Matches the codes used at deepl.com (EN, ES, FR, ...).
-fn deeplx_code(language: &TranslationLanguage) -> &'static str {
-    match language {
-        TranslationLanguage::English => "EN",
-        TranslationLanguage::Spanish => "ES",
-        TranslationLanguage::French => "FR",
-        TranslationLanguage::Korean => "KO",
-    }
-}
-
-/// Extracts the JSON object substring from a model response, stripping any
-/// surrounding markdown code fences or whitespace the model may have added.
-fn extract_json(s: &str) -> &str {
-    let start = s.find('{').unwrap_or(0);
-    let end = s.rfind('}').map(|i| i + 1).unwrap_or(s.len());
-    &s[start..end]
-}
-
 // ===== TranslationProvider impl =====
 
 impl TranslationProvider for AITranslationProvider {
@@ -122,26 +104,13 @@ impl TranslationProvider for AITranslationProvider {
 
             let task = async {
                 // Build language codes from slots (e.g. ["EN", "ES"])
-                let codes: Vec<&'static str> = slots
-                    .iter()
-                    .map(|(_, lang)| deeplx_code(lang))
-                    .collect();
+                let codes = build_lang_codes(&slots);
 
                 // Build JSON template: {"EN":"...","ES":"..."}
-                let json_template = format!(
-                    "{{{}}}",
-                    codes.iter()
-                        .map(|c| format!("\"{}\":\"...\"", c))
-                        .collect::<Vec<_>>()
-                        .join(",")
-                );
+                let json_template = build_json_template(&codes);
 
                 // Conversation history formatted as "author: message"
-                let conversation = history
-                    .iter()
-                    .map(|(author, msg)| format!("{}: {}", author, msg))
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let conversation = format_history(&history);
 
                 // Append translation instructions after the conversation
                 let user_content = format!(
@@ -176,7 +145,7 @@ impl TranslationProvider for AITranslationProvider {
                                 match serde_json::from_str::<HashMap<String, String>>(json_str) {
                                     Ok(result) => {
                                         for (slot, language) in &slots {
-                                            let code = deeplx_code(language);
+                                            let code = language.deeplx_code();
                                             let translation = result.get(code).cloned();
                                             let _ = tx.send((key, translation, *slot)).await;
                                         }
