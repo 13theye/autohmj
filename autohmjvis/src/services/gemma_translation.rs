@@ -79,19 +79,29 @@ impl TranslationProvider for GemmaTranslationProvider {
                 // Conversation history formatted as "author: message"
                 let conversation = format_history(&history);
 
+                // Just the message to be translated:
+                let Some(last_message) = history.last().map(|(_, msg)| msg) else {
+                    println!("WARNING: No message to translate");
+                    return;
+                };
+
                 // Single user turn: translator prompt + conversation + instructions
                 let user_content = format!(
-                    "{}\n\n{}\n---\nTranslate the last message into: {}\nRespond with JSON only: {}",
+                    "{}\n---\nConversation history:\n{}\n---\nTranslate the following message into: {}\n---\nMessage: {}\n---\nRespond with JSON only: {}",
                     prompt,
                     conversation,
                     codes.join(", "),
+                    last_message,
                     json_template,
                 );
+
+                println!("GemmaTranslationProvider: {:#?}", user_content);
 
                 let contents = vec![RequestContent {
                     role: "user".to_string(),
                     parts: vec![Part { text: user_content, ..Default::default() }],
                 }];
+
 
                 match generate_response(contents, model, url, client, api_key, thinking_model).await {
                     Ok(response) => {

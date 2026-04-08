@@ -1,12 +1,12 @@
-//! OpenAI API module
+//! OpenAI API module for Local AI
 //!
 //! Implements AIProvider for the OpenAI Responses API.
 
 pub mod types;
 
-use crate::openai::types::response::{MessageContent, OutputItem, ResponseObject};
+use crate::local_ai::types::response::{MessageContent, OutputItem, ResponseObject};
 use crate::services::ai::{AIContext, AIProvider, ProviderOutput};
-use crate::settings::OpenAIProviderConfig;
+use crate::settings::LocalAIProviderConfig;
 
 use async_openai::{
     config::OpenAIConfig,
@@ -16,18 +16,18 @@ use async_openai::{
 use std::error::Error;
 use tokio::sync::{broadcast, mpsc};
 
-pub struct OpenAIProvider {
+pub struct LocalAIProvider {
     model: String,
     client: Client<OpenAIConfig>,
 }
 
-impl OpenAIProvider {
-    pub fn new(config: &OpenAIProviderConfig) -> Self {
+impl LocalAIProvider {
+    pub fn new(config: &LocalAIProviderConfig) -> Self {
         let openai_config = OpenAIConfig::new()
             .with_api_key(config.api_key.clone().unwrap_or_default())
             .with_api_base(config.url.clone());
 
-        println!("Starting OpenAIProvider...");
+        println!("Starting LocalAIProvider...");
 
         Self {
             model: config.model.clone(),
@@ -36,7 +36,7 @@ impl OpenAIProvider {
     }
 }
 
-impl AIProvider for OpenAIProvider {
+impl AIProvider for LocalAIProvider {
     fn spawn_request(
         &self,
         context: AIContext,
@@ -46,34 +46,47 @@ impl AIProvider for OpenAIProvider {
     ) {
         let model = self.model.clone();
 
-        let (instructions, history_str, new_item_str, previous_response_id, is_moderator) = match context {
-            AIContext::Persona(ctx) => {
-                let history_str = ctx
-                    .history
-                    .iter()
-                    .map(|msg| format!("{}: {}", msg.author, msg.content))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let new_item_str = ctx
-                    .new_item
-                    .map(|msg| format!("{}: {}", msg.author, msg.content));
-                (ctx.instructions, history_str, new_item_str, ctx.previous_response_id, false)
-            }
-            AIContext::Moderator(ctx) => {
-                let history_str = ctx
-                    .history
-                    .iter()
-                    .map(|msg| format!("{}: {}", msg.author, msg.content))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                (ctx.instructions, history_str, None, ctx.previous_response_id, true)
-            }
-        };
+        let (instructions, history_str, new_item_str, previous_response_id, is_moderator) =
+            match context {
+                AIContext::Persona(ctx) => {
+                    let history_str = ctx
+                        .history
+                        .iter()
+                        .map(|msg| format!("{}: {}", msg.author, msg.content))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let new_item_str = ctx
+                        .new_item
+                        .map(|msg| format!("{}: {}", msg.author, msg.content));
+                    (
+                        ctx.instructions,
+                        history_str,
+                        new_item_str,
+                        ctx.previous_response_id,
+                        false,
+                    )
+                }
+                AIContext::Moderator(ctx) => {
+                    let history_str = ctx
+                        .history
+                        .iter()
+                        .map(|msg| format!("{}: {}", msg.author, msg.content))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    (
+                        ctx.instructions,
+                        history_str,
+                        None,
+                        ctx.previous_response_id,
+                        true,
+                    )
+                }
+            };
 
         let client = self.client.clone();
 
         rthandle.spawn(async move {
-            println!("OpenAIProvider: Send task created");
+            println!("LocalAIProvider: Send task created");
 
             let shutdown = async {
                 let _ = shutdown_rx.recv().await;
@@ -101,7 +114,7 @@ impl AIProvider for OpenAIProvider {
                 let request = match request_result {
                     Ok(r) => r,
                     Err(e) => {
-                        eprintln!("OpenAIProvider: Failed to generate request: {}", e);
+                        eprintln!("LocalAIProvider: Failed to generate request: {}", e);
                         let _ = tx.send(None).await;
                         return;
                     }
@@ -110,7 +123,7 @@ impl AIProvider for OpenAIProvider {
                 match send_response_request(request, &client).await {
                     Ok(response) => {
                         println!(
-                            "OpenAIProvider: Received successful response with id: {}",
+                            "LocalAIProvider: Received successful response with id: {}",
                             response.id
                         );
 
@@ -132,10 +145,12 @@ impl AIProvider for OpenAIProvider {
 
                         match message {
                             Some(message) => {
-                                let _ = tx.send(Some(ProviderOutput {
-                                    message,
-                                    response_id: Some(response.id.clone()),
-                                })).await;
+                                let _ = tx
+                                    .send(Some(ProviderOutput {
+                                        message,
+                                        response_id: Some(response.id.clone()),
+                                    }))
+                                    .await;
                             }
                             None => {
                                 let _ = tx.send(None).await;
@@ -143,7 +158,7 @@ impl AIProvider for OpenAIProvider {
                         }
                     }
                     Err(e) => {
-                        eprintln!("OpenAIProvider: API error: {}", e);
+                        eprintln!("LocalAIProvider: API error: {}", e);
                         let _ = tx.send(None).await;
                     }
                 }
@@ -151,10 +166,10 @@ impl AIProvider for OpenAIProvider {
 
             tokio::select! {
                 _ = shutdown => {
-                    println!("...OpenAIProvider received shutdown signal");
+                    println!("...LocalAIProvider received shutdown signal");
                 }
                 _ = task => {
-                    println!("...OpenAIProvider task completed normally");
+                    println!("...LocalAIProvider task completed normally");
                 }
             }
         });
@@ -184,7 +199,11 @@ fn build_request(
     is_moderator: bool,
 ) -> Result<responses::CreateResponse, Box<dyn Error + Send + Sync>> {
     let reasoning = Reasoning {
-        effort: Some(if is_moderator { ReasoningEffort::None } else { ReasoningEffort::Medium }),
+        effort: Some(if is_moderator {
+            ReasoningEffort::None
+        } else {
+            ReasoningEffort::Medium
+        }),
         summary: None,
     };
 
@@ -198,7 +217,7 @@ fn build_request(
     // Streaming is not currently used but kept here for future use.
     request.stream = Some(false);
 
-    println!("OpenAIProvider: Request object:\n{:#?}", request);
+    println!("LocalAIProvider: Request object:\n{:#?}", request);
 
     Ok(request)
 }

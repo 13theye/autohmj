@@ -14,15 +14,15 @@ use autohmjvis::{
     fps::FpsManager,
     gemma::GemmaProvider,
     intro::IntroImage,
+    local_ai::LocalAIProvider,
     models::{CommandMessage, HMJMessageWrapper, HumansTurn, LiveInputRegistry, Model},
-    openai::OpenAIProvider,
     server::HMJServer,
     services::{
         AIPersona, AIProvider, AIService, AITranslationProvider, ConversationService,
         DeepLXProvider, GemmaTranslationProvider, TranslationProvider, TranslationService,
     },
     settings::{
-        AiColorConfig, GemmaProviderConfig, GridConfig, HumanColorConfig, OpenAIProviderConfig,
+        AiColorConfig, GemmaProviderConfig, GridConfig, HumanColorConfig, LocalAIProviderConfig,
         OscSendConfig, Settings, UiStateConfig, UiStateFileConfig,
     },
     ui::control_panel::ControlPanel,
@@ -40,8 +40,8 @@ fn model(app: &App) -> Model {
     let gemma_provider_config = GemmaProviderConfig::load(&config.paths.ai)
         .expect("\nAuto훈민정음: FAILED TO LOAD GEMMA.TOML\n");
 
-    let openai_provider_config = OpenAIProviderConfig::load(&config.paths.ai)
-        .expect("\nAuto훈민정음: FAILED TO LOAD OPENAI.TOML\n");
+    let local_ai_provider_config = LocalAIProviderConfig::load(&config.paths.ai)
+        .expect("\nAuto훈민정음: FAILED TO LOAD LOCAL_AI.TOML\n");
 
     // Init and start ClockService
     let mut clock = ClockService::with().tempo(config.tempo.bpm as f64).build();
@@ -77,7 +77,7 @@ fn model(app: &App) -> Model {
         match config.translation.provider.as_str() {
             "local_ai" => {
                 println!("Using local OpenAI API translation provider");
-                Box::new(AITranslationProvider::new(&openai_provider_config))
+                Box::new(AITranslationProvider::new(&local_ai_provider_config))
             }
             "gemma" => {
                 println!("Using Gemma translation provider");
@@ -102,11 +102,11 @@ fn model(app: &App) -> Model {
     let (ai_p1, ai_p2, ai_mod, ai_system_prompt, ai_provider): (_, _, _, _, Box<dyn AIProvider>) =
         if config.ai_provider.local {
             (
-                &openai_provider_config.persona_1,
-                &openai_provider_config.persona_2,
-                &openai_provider_config.moderator,
-                openai_provider_config.system_prompt.clone(),
-                Box::new(OpenAIProvider::new(&openai_provider_config)),
+                &local_ai_provider_config.persona_1,
+                &local_ai_provider_config.persona_2,
+                &local_ai_provider_config.moderator,
+                local_ai_provider_config.system_prompt.clone(),
+                Box::new(LocalAIProvider::new(&local_ai_provider_config)),
             )
         } else {
             (

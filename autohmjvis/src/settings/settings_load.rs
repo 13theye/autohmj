@@ -140,7 +140,7 @@ impl GemmaProviderConfig {
     }
 }
 
-impl OpenAIProviderConfig {
+impl LocalAIProviderConfig {
     pub fn load(folder_name: &str) -> Result<Self, ConfigError> {
         let exe_path = env::current_exe()
             .map_err(|e| ConfigError::Message(format!("Failed to get executable path: {}", e)))?;
@@ -150,7 +150,7 @@ impl OpenAIProviderConfig {
         let path = exe_dir
             .join("autohmjvis-support")
             .join(folder_name)
-            .join("openai");
+            .join("local_ai");
         let path_str = path
             .to_str()
             .ok_or_else(|| ConfigError::Message("Invalid config path".to_string()))?;
@@ -160,4 +160,3 @@ impl OpenAIProviderConfig {
         s.try_deserialize()
     }
 }
-

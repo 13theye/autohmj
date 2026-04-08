@@ -157,7 +157,7 @@ pub struct GemmaProviderConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct OpenAIProviderConfig {
+pub struct LocalAIProviderConfig {
     pub system_prompt: String,
     pub api_key: Option<String>,
     pub url: String,

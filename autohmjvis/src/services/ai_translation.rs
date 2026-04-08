@@ -18,7 +18,7 @@ use crate::services::translate::{
     build_json_template, build_lang_codes, extract_json, format_history, TranslationLanguage,
     TranslationLanguageSlot, TranslationProvider,
 };
-use crate::settings::OpenAIProviderConfig;
+use crate::settings::LocalAIProviderConfig;
 
 pub struct AITranslationProvider {
     client: Client,
@@ -29,7 +29,7 @@ pub struct AITranslationProvider {
 }
 
 impl AITranslationProvider {
-    pub fn new(config: &OpenAIProviderConfig) -> Self {
+    pub fn new(config: &LocalAIProviderConfig) -> Self {
         println!("Starting AITranslationProvider...");
         Self {
             client: Client::new(),
