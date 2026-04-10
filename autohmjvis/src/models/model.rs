@@ -28,10 +28,13 @@ pub struct Model {
     pub convo: ConversationService,    // handles the conversation
     pub translate: TranslationService, // handles translation for both language slots
     pub ai: AIService,                 // handles the AI
-    pub clock: ClockService,            // handles the clock
+    pub clock: ClockService,           // handles the clock
+
+    // Tempo
+    pub original_tempo: f32,
 
     // Conversation channel (for moderator)
-    pub gemma_rx: broadcast::Receiver<AIEvent>,    // the channel for AI events
+    pub gemma_rx: broadcast::Receiver<AIEvent>, // the channel for AI events
     pub humans_turn: HumansTurn, // true if the moderator decides human should speak next
 
     // Content and views

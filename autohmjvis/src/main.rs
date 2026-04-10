@@ -44,7 +44,10 @@ fn model(app: &App) -> Model {
         .expect("\nAuto훈민정음: FAILED TO LOAD LOCAL_AI.TOML\n");
 
     // Init and start ClockService
-    let mut clock = ClockService::with().tempo(config.tempo.bpm as f64).build();
+    let mut clock = ClockService::with()
+        .tempo(config.tempo.bpm as f64)
+        .thread_priority(47)
+        .build();
     // Start the clock thread or quit if it fails
     clock
         .start_thread()
@@ -52,6 +55,11 @@ fn model(app: &App) -> Model {
     clock
         .start_clock()
         .expect("AutoHMJVis: fatal error: Failed to start clock");
+
+    match clock.set_tempo(config.tempo.bpm as f64) {
+        Ok(()) => println!("AutoHMJVis: Set tempo to {}", config.tempo.bpm),
+        Err(e) => eprintln!("AutoHMJVis: warning: Failed to set tempo: {}", e),
+    }
 
     // Initialize event bus
     let event_bus = HMJEventBus::default();
@@ -292,6 +300,8 @@ fn model(app: &App) -> Model {
         translate,
         ai,
         clock,
+
+        original_tempo: config.tempo.bpm as f32,
 
         gemma_rx,
         humans_turn: HumansTurn::True,
@@ -543,6 +553,14 @@ fn update(_app: &App, model: &mut Model, update: Update) {
     // FPS update
     if model.show_fps {
         model.fps.update();
+    }
+
+    // Assert tempo
+    {
+        let target_bpm = model.original_tempo as f64;
+        if (model.clock.tempo() - target_bpm).abs() > 0.1 {
+            let _ = model.clock.set_tempo(target_bpm);
+        }
     }
 
     // Update services
