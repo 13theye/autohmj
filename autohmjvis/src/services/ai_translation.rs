@@ -84,7 +84,7 @@ impl TranslationProvider for AITranslationProvider {
     fn spawn_translation(
         &self,
         key: usize,
-        _msg: String,
+        msg: String,
         history: Vec<(String, String)>,
         slots: Vec<(TranslationLanguageSlot, TranslationLanguage)>,
         tx: mpsc::Sender<(usize, Option<String>, TranslationLanguageSlot)>,
@@ -112,11 +112,13 @@ impl TranslationProvider for AITranslationProvider {
                 // Conversation history formatted as "author: message"
                 let conversation = format_history(&history);
 
-                // Append translation instructions after the conversation
+                // Append translation instructions with the explicit message to translate
                 let user_content = format!(
-                    "{}\n---\nTranslate the last message into: {}\nRespond with JSON only: {}",
+                    "{}\n---\nConversation history:\n{}\n---\nTranslate the following message into: {}\n---\nMessage: {}\n---\nRespond with JSON only: {}",
+                    prompt,
                     conversation,
                     codes.join(", "),
+                    msg,
                     json_template,
                 );
 
