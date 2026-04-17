@@ -18,6 +18,6 @@ pub enum ContentEvent {
         source_id: String,
         content: String,
     },
-    GemmaRequested(String),
-    GemmaFailed(String),
+    AIRequested(String),
+    AIFailed(String),
 }

@@ -155,12 +155,12 @@ impl ContentManager {
                 AIEvent::AIRequested(id) if id == self.id => {
                     let _ = self
                         .content_tx
-                        .send(ContentEvent::GemmaRequested(self.id.to_owned()));
+                        .send(ContentEvent::AIRequested(self.id.to_owned()));
                 }
                 AIEvent::AIFailed(id) if id == self.id => {
                     let _ = self
                         .content_tx
-                        .send(ContentEvent::GemmaFailed(self.id.to_owned()));
+                        .send(ContentEvent::AIFailed(self.id.to_owned()));
                 }
                 _ => {}
             }

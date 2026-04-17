@@ -334,13 +334,13 @@ impl TextGrid {
                     self.latest_convo_item = convo_item;
                     self.update_content_chars();
                 }
-                ContentEvent::GemmaRequested(id) if id == self.id => {
+                ContentEvent::AIRequested(id) if id == self.id => {
                     self.status_bar.set_waiting(now);
 
                     // Send OSC event for AI requested
                     self.osc_sender.send_ai_requested(&self.id);
                 }
-                ContentEvent::GemmaFailed(id) if id == self.id => {
+                ContentEvent::AIFailed(id) if id == self.id => {
                     self.status_bar.set_idle(now);
                     self.osc_sender.send_ai_finished(&self.id);
                 }
