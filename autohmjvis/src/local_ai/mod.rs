@@ -123,16 +123,15 @@ impl AIProvider for LocalAIProvider {
                     }
                 };
 
-                match tokio::time::timeout(
-                    request_timeout,
-                    send_response_request(request, &client),
-                )
-                .await
+                match tokio::time::timeout(request_timeout, send_response_request(request, &client))
+                    .await
                 {
                     Err(_) => {
-                        eprintln!("LocalAIProvider: Request timed out after {:?}", request_timeout);
+                        eprintln!(
+                            "LocalAIProvider: Request timed out after {:?}",
+                            request_timeout
+                        );
                         let _ = tx.send(None).await;
-                        return;
                     }
                     Ok(Ok(response)) => {
                         println!(

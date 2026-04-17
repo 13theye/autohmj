@@ -56,11 +56,6 @@ fn model(app: &App) -> Model {
         .start_clock()
         .expect("AutoHMJVis: fatal error: Failed to start clock");
 
-    match clock.set_tempo(config.tempo.bpm as f64) {
-        Ok(()) => println!("AutoHMJVis: Set tempo to {}", config.tempo.bpm),
-        Err(e) => eprintln!("AutoHMJVis: warning: Failed to set tempo: {}", e),
-    }
-
     // Initialize event bus
     let event_bus = HMJEventBus::default();
 
@@ -291,6 +286,11 @@ fn model(app: &App) -> Model {
 
     // Create the control panel for the performer window
     let control_panel = ControlPanel::new(&performer_window);
+
+    match clock.set_tempo(config.tempo.bpm as f64) {
+        Ok(()) => println!("AutoHMJVis: Set tempo to {}", config.tempo.bpm),
+        Err(e) => eprintln!("AutoHMJVis: warning: Failed to set tempo: {}", e),
+    }
 
     Model {
         background: BackgroundManager::new(rgb(0.05, 0.03, 0.0)),
@@ -553,14 +553,6 @@ fn update(_app: &App, model: &mut Model, update: Update) {
     // FPS update
     if model.show_fps {
         model.fps.update();
-    }
-
-    // Assert tempo
-    {
-        let target_bpm = model.original_tempo as f64;
-        if (model.clock.tempo() - target_bpm).abs() > 0.1 {
-            let _ = model.clock.set_tempo(target_bpm);
-        }
     }
 
     // Update services
@@ -948,6 +940,13 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
         }
         Key::I => {
             model.intro_image.toggle_visible();
+            // check the clock
+            let target_bpm = model.original_tempo as f64;
+            let current_bpm = model.clock.tempo();
+            if (target_bpm - current_bpm).abs() > 0.5 {
+                println!("Set tempo from {} to {}", current_bpm, target_bpm);
+                let _ = model.clock.set_tempo(target_bpm);
+            }
         }
         Key::M => {
             model.control_panel.show = !model.control_panel.show;
