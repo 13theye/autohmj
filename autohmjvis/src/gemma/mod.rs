@@ -18,6 +18,7 @@ pub struct GemmaProvider {
     pub model: String,
     pub thinking_model: bool,
     pub client: Client,
+    pub request_timeout: std::time::Duration,
 }
 
 impl GemmaProvider {
@@ -33,6 +34,7 @@ impl GemmaProvider {
             model: config.model.clone(),
             thinking_model,
             client: Client::new(),
+            request_timeout: std::time::Duration::from_secs(config.request_timeout_secs),
         }
     }
 }
@@ -97,6 +99,7 @@ impl AIProvider for GemmaProvider {
         let model = self.model.clone();
         let url = self.url.clone();
         let thinking_model = self.thinking_model;
+        let request_timeout = self.request_timeout;
 
         rthandle.spawn(async move {
             println!("Gemma async task created");
@@ -106,12 +109,21 @@ impl AIProvider for GemmaProvider {
             };
 
             let task = async {
-                match generate_response(contents, model, url, client, api_key, thinking_model).await {
-                    Ok(response) => {
+                match tokio::time::timeout(
+                    request_timeout,
+                    generate_response(contents, model, url, client, api_key, thinking_model),
+                )
+                .await
+                {
+                    Err(_) => {
+                        eprintln!("Gemma: Request timed out after {:?}", request_timeout);
+                        let _ = tx.send(None).await;
+                    }
+                    Ok(Ok(response)) => {
                         println!("Received successful response of length {}", response.len());
                         let _ = tx.send(Some(ProviderOutput { message: response, response_id: None })).await;
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         eprintln!("Gemma API error: {}", e);
                         if let Some(source) = e.source() {
                             eprintln!("Error source: {}", source);

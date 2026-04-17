@@ -92,6 +92,7 @@ pub enum AIEvent {
     AIReceived(AIResponse),   // A response from an AI instance has been received.
     ModeratorChooses(String), // The ID of the persona who should speak next.
     AIRequested(String),      // A request has been sent to an AI instance (ID).
+    AIFailed(String),         // A request to an AI instance failed (payload: persona ID).
 }
 
 // ===== Service =====
@@ -178,6 +179,14 @@ impl AIService {
                     ai_persona
                 ));
             };
+            if instance.pending {
+                println!(
+                    "AIService::send: request already pending for {}, skipping",
+                    instance.id
+                );
+                return Ok(());
+            }
+            instance.pending = true;
             let prev_id = instance.last_response_id.clone();
             let history = incremental_history(&full_history, &instance.id, &prev_id);
             let instructions = format!(
@@ -247,6 +256,7 @@ impl AIService {
         for instance in self.instances.values_mut() {
             match instance.rx.try_recv() {
                 Ok(Some(output)) => {
+                    instance.pending = false;
                     instance.last_response_id = output.response_id;
                     let message = output.message;
                     println!("Received response from Ai instance: {:#?}", message);
@@ -257,7 +267,9 @@ impl AIService {
                     }));
                 }
                 Ok(None) => {
+                    instance.pending = false;
                     println!("Received empty response from AI task: {}", instance.id);
+                    let _ = self.event_tx.send(AIEvent::AIFailed(instance.id.to_owned()));
                 }
                 Err(_) => {}
             }
@@ -270,6 +282,7 @@ impl AIService {
     pub fn reset_response_ids(&mut self) {
         for instance in self.instances.values_mut() {
             instance.last_response_id = None;
+            instance.pending = false;
         }
         self.moderator.instance.last_response_id = None;
     }
@@ -304,6 +317,8 @@ pub struct AIInstance {
     /// The `id` from the most recent response. Used as `previous_response_id`
     /// on the next request to enable stateful multi-turn conversations.
     pub last_response_id: Option<String>,
+    /// True while a request is in-flight. Prevents duplicate requests to the same persona.
+    pub pending: bool,
 }
 
 impl AIInstance {
@@ -315,6 +330,7 @@ impl AIInstance {
             tx,
             rx,
             last_response_id: None,
+            pending: false,
         }
     }
 

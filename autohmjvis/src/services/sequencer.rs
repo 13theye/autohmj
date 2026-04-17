@@ -3,7 +3,11 @@
 //
 // Desconstruct and parse hangeul characters and send OSC messages
 
-use crate::{osc::OscSender, settings::OscSendConfig, views::GridCellChar};
+use crate::{
+    osc::{alphabetic::to_hangeul_components, OscSender},
+    settings::OscSendConfig,
+    views::GridCellChar,
+};
 use std::time::Instant;
 
 pub struct Sequencer {
@@ -54,8 +58,10 @@ impl Sequencer {
 
             // send letters as uppercase ascii
             } else if ch.is_ascii_alphanumeric() {
-                self.osc_sender
-                    .send_alphanumeric_as_hangeul(self.id.as_str(), ch);
+                let Some(c) = to_hangeul_components(ch) else {
+                    return;
+                };
+                self.send_commands(vec![c]);
             }
         }
     }

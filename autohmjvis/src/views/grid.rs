@@ -340,6 +340,10 @@ impl TextGrid {
                     // Send OSC event for AI requested
                     self.osc_sender.send_ai_requested(&self.id);
                 }
+                ContentEvent::GemmaFailed(id) if id == self.id => {
+                    self.status_bar.set_idle(now);
+                    self.osc_sender.send_ai_finished(&self.id);
+                }
                 _ => {} // Ignore events for other grids
             }
         }

@@ -19,6 +19,7 @@ use tokio::sync::{broadcast, mpsc};
 pub struct LocalAIProvider {
     model: String,
     client: Client<OpenAIConfig>,
+    request_timeout: std::time::Duration,
 }
 
 impl LocalAIProvider {
@@ -32,6 +33,7 @@ impl LocalAIProvider {
         Self {
             model: config.model.clone(),
             client: Client::with_config(openai_config),
+            request_timeout: std::time::Duration::from_secs(config.request_timeout_secs),
         }
     }
 }
@@ -84,6 +86,7 @@ impl AIProvider for LocalAIProvider {
             };
 
         let client = self.client.clone();
+        let request_timeout = self.request_timeout;
 
         rthandle.spawn(async move {
             println!("LocalAIProvider: Send task created");
@@ -120,8 +123,18 @@ impl AIProvider for LocalAIProvider {
                     }
                 };
 
-                match send_response_request(request, &client).await {
-                    Ok(response) => {
+                match tokio::time::timeout(
+                    request_timeout,
+                    send_response_request(request, &client),
+                )
+                .await
+                {
+                    Err(_) => {
+                        eprintln!("LocalAIProvider: Request timed out after {:?}", request_timeout);
+                        let _ = tx.send(None).await;
+                        return;
+                    }
+                    Ok(Ok(response)) => {
                         println!(
                             "LocalAIProvider: Received successful response with id: {}",
                             response.id
@@ -157,7 +170,7 @@ impl AIProvider for LocalAIProvider {
                             }
                         }
                     }
-                    Err(e) => {
+                    Ok(Err(e)) => {
                         eprintln!("LocalAIProvider: API error: {}", e);
                         let _ = tx.send(None).await;
                     }
@@ -200,7 +213,7 @@ fn build_request(
 ) -> Result<responses::CreateResponse, Box<dyn Error + Send + Sync>> {
     let reasoning = Reasoning {
         effort: Some(if is_moderator {
-            ReasoningEffort::None
+            ReasoningEffort::Minimal
         } else {
             ReasoningEffort::Medium
         }),

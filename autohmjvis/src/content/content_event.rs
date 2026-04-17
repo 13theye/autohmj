@@ -19,4 +19,5 @@ pub enum ContentEvent {
         content: String,
     },
     GemmaRequested(String),
+    GemmaFailed(String),
 }

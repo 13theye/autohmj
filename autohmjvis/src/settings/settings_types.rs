@@ -150,6 +150,9 @@ pub struct GemmaProviderConfig {
     /// Set to true for thinking models (e.g. Gemma 4). Defaults to false.
     #[serde(default)]
     pub thinking_model: bool,
+    /// Request timeout in seconds. Defaults to 30.
+    #[serde(default = "default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
     pub persona_1: PersonaConfig,
     pub persona_2: PersonaConfig,
     pub moderator: PersonaConfig,
@@ -162,8 +165,15 @@ pub struct LocalAIProviderConfig {
     pub api_key: Option<String>,
     pub url: String,
     pub model: String,
+    /// Request timeout in seconds. Defaults to 30.
+    #[serde(default = "default_request_timeout_secs")]
+    pub request_timeout_secs: u64,
     pub persona_1: PersonaConfig,
     pub persona_2: PersonaConfig,
     pub moderator: PersonaConfig,
     pub translator: PersonaConfig,
+}
+
+fn default_request_timeout_secs() -> u64 {
+    30
 }
