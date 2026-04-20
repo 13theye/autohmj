@@ -56,6 +56,14 @@ fn model(app: &App) -> Model {
         .start_clock()
         .expect("AutoHMJVis: fatal error: Failed to start clock");
 
+    // wait for clock to start
+    println!("Waiting for Link Session to connect...");
+    std::thread::sleep(std::time::Duration::from_secs(2));
+
+    // set the tempo
+    let target_bpm = config.tempo.bpm as f64;
+    let _ = clock.set_tempo(target_bpm);
+
     // Initialize event bus
     let event_bus = HMJEventBus::default();
 
@@ -924,11 +932,13 @@ fn draw_humans_turn_indicator(draw: &Draw, humans_turn: HumansTurn, screen_rect:
 fn key_pressed(app: &App, model: &mut Model, key: Key) {
     match key {
         Key::T => {
-            model.translate.toggle_first_enabled();
-        }
-
-        Key::Y => {
-            model.translate.toggle_second_enabled();
+            // check the tempo
+            let target_bpm = model.original_tempo as f64;
+            let current_bpm = model.clock.tempo();
+            if (target_bpm - current_bpm).abs() > 0.5 {
+                println!("Set tempo from {} to {}", current_bpm, target_bpm);
+                let _ = model.clock.set_tempo(target_bpm);
+            }
         }
 
         Key::P => {
@@ -940,13 +950,6 @@ fn key_pressed(app: &App, model: &mut Model, key: Key) {
         }
         Key::I => {
             model.intro_image.toggle_visible();
-            // check the clock
-            let target_bpm = model.original_tempo as f64;
-            let current_bpm = model.clock.tempo();
-            if (target_bpm - current_bpm).abs() > 0.5 {
-                println!("Set tempo from {} to {}", current_bpm, target_bpm);
-                let _ = model.clock.set_tempo(target_bpm);
-            }
         }
         Key::M => {
             model.control_panel.show = !model.control_panel.show;
