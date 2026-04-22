@@ -20,6 +20,7 @@ pub struct LocalAIProvider {
     model: String,
     client: Client<OpenAIConfig>,
     request_timeout: std::time::Duration,
+    thinking_model: bool,
 }
 
 impl LocalAIProvider {
@@ -34,6 +35,7 @@ impl LocalAIProvider {
             model: config.model.clone(),
             client: Client::with_config(openai_config),
             request_timeout: std::time::Duration::from_secs(config.request_timeout_secs),
+            thinking_model: config.thinking_model,
         }
     }
 }
@@ -87,6 +89,7 @@ impl AIProvider for LocalAIProvider {
 
         let client = self.client.clone();
         let request_timeout = self.request_timeout;
+        let thinking_model = self.thinking_model;
 
         rthandle.spawn(async move {
             println!("LocalAIProvider: Send task created");
@@ -104,6 +107,7 @@ impl AIProvider for LocalAIProvider {
                         model,
                         prev_id,
                         is_moderator,
+                        thinking_model,
                     ),
                     None => generate_stateless_request(
                         history_str,
@@ -111,6 +115,7 @@ impl AIProvider for LocalAIProvider {
                         instructions,
                         model,
                         is_moderator,
+                        thinking_model,
                     ),
                 };
 
@@ -202,28 +207,31 @@ fn format_input(history: String, new_item: Option<String>, instructions: &str) -
     format!("input : {}\ninstructions : {}", input, instructions)
 }
 
-/// Shared low-level builder. Sets reasoning config, disables streaming,
+/// Shared low-level builder. Optionally sets reasoning config, disables streaming,
 /// and optionally links to a previous response for stateful conversations.
 fn build_request(
     content: String,
     model: String,
     previous_response_id: Option<String>,
     is_moderator: bool,
+    thinking_model: bool,
 ) -> Result<responses::CreateResponse, Box<dyn Error + Send + Sync>> {
-    let reasoning = Reasoning {
-        effort: Some(if is_moderator {
-            ReasoningEffort::Minimal
-        } else {
-            ReasoningEffort::Medium
-        }),
-        summary: None,
-    };
+    let mut args = responses::CreateResponseArgs::default();
+    args.model(model).input(content);
 
-    let mut request = responses::CreateResponseArgs::default()
-        .model(model)
-        .input(content)
-        .reasoning(reasoning)
-        .build()?;
+    if thinking_model {
+        let reasoning = Reasoning {
+            effort: Some(if is_moderator {
+                ReasoningEffort::Minimal
+            } else {
+                ReasoningEffort::Medium
+            }),
+            summary: None,
+        };
+        args.reasoning(reasoning);
+    }
+
+    let mut request = args.build()?;
 
     request.previous_response_id = previous_response_id;
     // Streaming is not currently used but kept here for future use.
@@ -242,9 +250,10 @@ fn generate_stateless_request(
     instructions: String,
     model: String,
     is_moderator: bool,
+    thinking_model: bool,
 ) -> Result<responses::CreateResponse, Box<dyn Error + Send + Sync>> {
     let content = format_input(history, new_item, &instructions);
-    build_request(content, model, None, is_moderator)
+    build_request(content, model, None, is_moderator, thinking_model)
 }
 
 /// Subsequent turns: sends only messages added since the last response.
@@ -256,9 +265,10 @@ fn generate_stateful_request(
     model: String,
     previous_response_id: String,
     is_moderator: bool,
+    thinking_model: bool,
 ) -> Result<responses::CreateResponse, Box<dyn Error + Send + Sync>> {
     let content = format_input(incremental, new_item, &instructions);
-    build_request(content, model, Some(previous_response_id), is_moderator)
+    build_request(content, model, Some(previous_response_id), is_moderator, thinking_model)
 }
 
 async fn send_response_request(

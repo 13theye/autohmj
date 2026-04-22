@@ -165,6 +165,9 @@ pub struct LocalAIProviderConfig {
     pub api_key: Option<String>,
     pub url: String,
     pub model: String,
+    /// Set to true for models that support the reasoning/thinking effort parameter. Defaults to false.
+    #[serde(default)]
+    pub thinking_model: bool,
     /// Request timeout in seconds. Defaults to 30.
     #[serde(default = "default_request_timeout_secs")]
     pub request_timeout_secs: u64,
