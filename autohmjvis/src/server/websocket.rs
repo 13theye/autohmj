@@ -407,6 +407,6 @@ impl Drop for HMJServer {
         println!("...HMJServer being dropped");
         self.shutdown();
         // Wait briefly
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }

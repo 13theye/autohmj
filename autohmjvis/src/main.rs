@@ -342,7 +342,7 @@ fn model(app: &App) -> Model {
         show_fps: false,
         show_debug: false,
         control_panel,
-        runtime,
+        runtime: Some(runtime),
     }
 }
 

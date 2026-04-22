@@ -78,17 +78,23 @@ pub struct Model {
     // Control panel (toggled with M key)
     pub control_panel: ControlPanel,
 
-    // Shared async runtime — must be last so it drops after all services
-    pub runtime: tokio::runtime::Runtime,
+    // Wrapped in Option so Drop can move it to a plain OS thread before dropping.
+    // Nannou runs its event loop inside block_on(), so the main thread is always
+    // in an async context — dropping a Runtime there panics.
+    pub runtime: Option<tokio::runtime::Runtime>,
 }
 
 // ************************ Graceful Shutdown  *************************************
 
 impl Drop for Model {
     fn drop(&mut self) {
-        // Modules shut themselves down gracefully.
-
         println!("\nShutting down AutoHMJVis...");
+        // Move the runtime onto a plain OS thread before dropping it.
+        // Nannou runs inside block_on(), so we're in an async context here;
+        // dropping a Runtime directly from an async context panics.
+        if let Some(rt) = self.runtime.take() {
+            std::thread::spawn(move || drop(rt));
+        }
     }
 }
 
