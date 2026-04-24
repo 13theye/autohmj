@@ -46,7 +46,6 @@ fn model(app: &App) -> Model {
     // Init and start ClockService
     let mut clock = ClockService::with()
         .tempo(config.tempo.bpm as f64)
-        .thread_priority(47)
         .build();
     // Start the clock thread or quit if it fails
     clock
@@ -343,7 +342,20 @@ fn model(app: &App) -> Model {
         show_debug: false,
         control_panel,
         runtime: Some(runtime),
+
+        #[cfg(target_os = "macos")]
+        app_nap_token: acquire_app_nap_token(),
     }
+}
+
+#[cfg(target_os = "macos")]
+fn acquire_app_nap_token() -> objc2::rc::Retained<
+    objc2::runtime::ProtocolObject<dyn objc2_foundation::NSObjectProtocol>
+> {
+    use objc2_foundation::{ns_string, NSActivityOptions, NSProcessInfo};
+    let options = NSActivityOptions::Background | NSActivityOptions::LatencyCritical;
+    NSProcessInfo::processInfo()
+        .beginActivityWithOptions_reason(options, ns_string!("Real-time OSC sequencer"))
 }
 
 fn main() {

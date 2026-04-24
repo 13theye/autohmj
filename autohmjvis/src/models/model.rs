@@ -82,6 +82,12 @@ pub struct Model {
     // Nannou runs its event loop inside block_on(), so the main thread is always
     // in an async context — dropping a Runtime there panics.
     pub runtime: Option<tokio::runtime::Runtime>,
+
+    #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
+    pub app_nap_token: objc2::rc::Retained<
+        objc2::runtime::ProtocolObject<dyn objc2_foundation::NSObjectProtocol>
+    >,
 }
 
 // ************************ Graceful Shutdown  *************************************
