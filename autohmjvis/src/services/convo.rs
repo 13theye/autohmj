@@ -24,6 +24,7 @@ pub enum ConvoEvent {
 // triggering appropriate actions.
 pub struct ConversationService {
     conversation: ConversationManager,
+    max_convo_history: usize,
 
     // Events
     event_tx: broadcast::Sender<ConvoEvent>,
@@ -33,7 +34,7 @@ pub struct ConversationService {
 }
 
 impl ConversationService {
-    pub fn new(events: &HMJEventBus) -> Self {
+    pub fn new(events: &HMJEventBus, max_convo_history: usize) -> Self {
         // Set up eventbus send
         let translation_rx = events.translation.subscribe();
 
@@ -47,6 +48,7 @@ impl ConversationService {
 
         Self {
             conversation,
+            max_convo_history,
             event_tx,
             translation_rx,
             server_rx,
@@ -112,6 +114,10 @@ impl ConversationService {
     // Add a new ConvoItem to the Conversation
     pub fn add(&mut self, item: ConvoItem) {
         let key = self.conversation.add(&item);
+
+        if self.conversation.entries.len() > self.max_convo_history {
+            self.conversation.purge_oldest();
+        }
 
         // Notify event subscribers
         let _ = self.event_tx.send(ConvoEvent::ItemAdded(key, item));

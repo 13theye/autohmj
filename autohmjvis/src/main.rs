@@ -44,9 +44,7 @@ fn model(app: &App) -> Model {
         .expect("\nAuto훈민정음: FAILED TO LOAD LOCAL_AI.TOML\n");
 
     // Init and start ClockService
-    let mut clock = ClockService::with()
-        .tempo(config.tempo.bpm as f64)
-        .build();
+    let mut clock = ClockService::with().tempo(config.tempo.bpm as f64).build();
     // Start the clock thread or quit if it fails
     clock
         .start_thread()
@@ -81,7 +79,8 @@ fn model(app: &App) -> Model {
     let mut live_input_registry = LiveInputRegistry::new();
 
     // Initialize services
-    let convo = ConversationService::new(&event_bus);
+    let max_convo_history = 40; // hard-coded to avoid config change
+    let convo = ConversationService::new(&event_bus, max_convo_history);
 
     let translation_provider: Box<dyn TranslationProvider> =
         match config.translation.provider.as_str() {
@@ -349,9 +348,8 @@ fn model(app: &App) -> Model {
 }
 
 #[cfg(target_os = "macos")]
-fn acquire_app_nap_token() -> objc2::rc::Retained<
-    objc2::runtime::ProtocolObject<dyn objc2_foundation::NSObjectProtocol>
-> {
+fn acquire_app_nap_token(
+) -> objc2::rc::Retained<objc2::runtime::ProtocolObject<dyn objc2_foundation::NSObjectProtocol>> {
     use objc2_foundation::{ns_string, NSActivityOptions, NSProcessInfo};
     let options = NSActivityOptions::Background | NSActivityOptions::LatencyCritical;
     NSProcessInfo::processInfo()

@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 
 use crate::services::translate::{
-    build_json_template, build_lang_codes, extract_json, format_history, TranslationLanguage,
-    TranslationLanguageSlot, TranslationProvider,
+    build_json_template, build_lang_codes, extract_json, format_history, parse_translation_map,
+    TranslationLanguage, TranslationLanguageSlot, TranslationProvider,
 };
 use crate::settings::LocalAIProviderConfig;
 
@@ -153,9 +153,16 @@ impl TranslationProvider for AITranslationProvider {
                                         }
                                     }
                                     Err(e) => {
-                                        eprintln!("AITranslationProvider: JSON parse error: {} | raw: {}", e, content);
-                                        for (slot, _) in &slots {
-                                            let _ = tx.send((key, None, *slot)).await;
+                                        if let Some(result) = parse_translation_map(json_str) {
+                                            for (slot, language) in &slots {
+                                                let translation = result.get(language.deeplx_code()).cloned();
+                                                let _ = tx.send((key, translation, *slot)).await;
+                                            }
+                                        } else {
+                                            eprintln!("AITranslationProvider: JSON parse error: {} | raw: {}", e, content);
+                                            for (slot, _) in &slots {
+                                                let _ = tx.send((key, None, *slot)).await;
+                                            }
                                         }
                                     }
                                 }

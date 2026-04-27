@@ -319,12 +319,97 @@ pub(crate) fn format_history(history: &[(String, String)]) -> String {
         .join("\n")
 }
 
-/// Extracts the JSON object substring from a model response, stripping any
-/// surrounding markdown code fences or whitespace the model may have added.
+/// Extracts the first balanced JSON object from a model response, ignoring any
+/// surrounding markdown fences or trailing garbage (e.g. stray `"}` lines).
 pub(crate) fn extract_json(s: &str) -> &str {
-    let start = s.find('{').unwrap_or(0);
-    let end = s.rfind('}').map(|i| i + 1).unwrap_or(s.len());
-    &s[start..end]
+    let start = match s.find('{') {
+        Some(i) => i,
+        None => return s,
+    };
+
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escape = false;
+
+    for (i, b) in s[start..].bytes().enumerate() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        match b {
+            b'\\' if in_string => escape = true,
+            b'"' => in_string = !in_string,
+            b'{' if !in_string => depth += 1,
+            b'}' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    return &s[start..start + i + 1];
+                }
+            }
+            _ => {}
+        }
+    }
+
+    &s[start..]
+}
+
+/// Fallback parser called when `serde_json::from_str::<HashMap<String, String>>` fails.
+/// Tries each `{` position in the string so a corrupt prefix (e.g. `{"` or stray
+/// leading brackets/quotes) is skipped until a parseable object is found.
+/// Also recovers from nested wrapper keys and extra quotes on values.
+pub(crate) fn parse_translation_map(json_str: &str) -> Option<std::collections::HashMap<String, String>> {
+    let mut offset = 0;
+    while let Some(rel) = json_str[offset..].find('{') {
+        let candidate = extract_json(&json_str[offset + rel..]);
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(candidate) {
+            if let Some(result) = value_to_map(&value) {
+                println!("parse_translation_map: fallback succeeded (offset={}) | raw: {}", offset + rel, json_str);
+                return Some(result);
+            }
+        }
+        offset += rel + 1;
+    }
+    None
+}
+
+fn value_to_map(value: &serde_json::Value) -> Option<std::collections::HashMap<String, String>> {
+    let obj = match value {
+        serde_json::Value::Array(arr) => arr.first()?,
+        other => other,
+    };
+
+    if let serde_json::Value::Object(map) = obj {
+        // Flat map with string values (handles extra-quoted values via strip_quotes)
+        let flat: std::collections::HashMap<String, String> = map.iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), strip_quotes(s))))
+            .collect();
+        if !flat.is_empty() {
+            return Some(flat);
+        }
+
+        // One level of nesting: {"translations": {"EN": "..."}}
+        for (_, nested) in map.iter() {
+            if let serde_json::Value::Object(inner) = nested {
+                let result: std::collections::HashMap<String, String> = inner.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), strip_quotes(s))))
+                    .collect();
+                if !result.is_empty() {
+                    return Some(result);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn strip_quotes(s: &str) -> String {
+    let t = s.trim();
+    if t.len() >= 2 && t.starts_with('"') && t.ends_with('"') {
+        t[1..t.len() - 1].to_string()
+    } else {
+        t.to_string()
+    }
 }
 
 impl<T> From<T> for TranslationLanguage

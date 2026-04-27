@@ -39,6 +39,11 @@ impl ConversationManager {
         key
     }
 
+    // Purge the oldest entry
+    pub fn purge_oldest(&mut self) {
+        self.entries.remove(&0);
+    }
+
     // Add a translation to a ConvoItem
     pub fn add_translation(
         &mut self,
